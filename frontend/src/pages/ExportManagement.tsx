@@ -69,13 +69,13 @@ export default function ExportManagement() {
       {/* Masthead */}
       <div style={styles.masthead} className="animate-rise">
         <div style={styles.kicker}>
-          <span style={styles.kickerRule} /> Export · Sage 200
+          <span style={styles.kickerRule} /> Export
         </div>
         <h1 style={styles.title}>
           Generate <em style={styles.titleEm}>the ledger</em>.
         </h1>
         <p style={styles.subtitle}>
-          Approved invoices become a validated Sage 200 CSV. Select the batch, review, export.
+          Approved invoices become a validated CSV for accounting system import. Select the batch, review, export.
         </p>
       </div>
 
@@ -195,7 +195,7 @@ export default function ExportManagement() {
               onClick={handleGenerate}
               disabled={generating}
             >
-              {generating ? 'Generating…' : 'Generate Sage 200 CSV'}
+              {generating ? 'Generating…' : 'Generate CSV'}
               <span style={styles.exportBtnArrow}>→</span>
             </button>
           </div>

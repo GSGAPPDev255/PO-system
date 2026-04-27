@@ -8,7 +8,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import type { Profile, Approver, UserRole } from '../lib/supabase';
+import type { Profile, UserRole } from '../lib/supabase';
 
 type Tab = 'users' | 'approvers' | 'alerts' | 'system';
 
@@ -308,23 +308,19 @@ interface GalUser {
   job_title: string | null;
 }
 
-interface EditApprover { display_name: string; email: string; department: string }
-
 function ApproversTab() {
-  // GAL search state
-  const [searchQuery, setSearchQuery]   = useState('');
-  const [searching, setSearching]       = useState(false);
-  const [galResults, setGalResults]     = useState<GalUser[] | null>(null);
-  const [galError, setGalError]         = useState<string | null>(null);
-  const [adding, setAdding]             = useState<string | null>(null);
-  const [approvers, setApprovers]       = useState<Approver[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searching, setSearching]     = useState(false);
+  const [galResults, setGalResults]   = useState<GalUser[] | null>(null);
+  const [galError, setGalError]       = useState<string | null>(null);
+  const [adding, setAdding]           = useState<string | null>(null);
+  const [added, setAdded]             = useState<Set<string>>(new Set());
 
-  // Manual add state
   const [showManual, setShowManual]     = useState(false);
   const [manualForm, setManualForm]     = useState({ display_name: '', email: '', department: '' });
   const [manualSaving, setManualSaving] = useState(false);
 
-  const [msg, setMsg]     = useState('');
+  const [msg, setMsg]       = useState('');
   const [msgType, setMsgType] = useState<'success' | 'error'>('success');
 
   function flash(m: string, type: 'success' | 'error' = 'success') {
@@ -332,19 +328,6 @@ function ApproversTab() {
     setTimeout(() => setMsg(''), 4000);
   }
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const { data, error } = await supabase.from('approvers').select('*').order('display_name').eq('is_active', true);
-        if (error) { flash('Could not load approvers: ' + error.message, 'error'); }
-        setApprovers((data as Approver[]) ?? []);
-      } catch (e) {
-        flash('Load failed: ' + (e as Error).message, 'error');
-      }
-    })();
-  }, []);
-
-  // Search the GAL via admin-actions edge function
   async function searchGal() {
     if (!searchQuery.trim() || searchQuery.trim().length < 2) return;
     setSearching(true);
@@ -363,7 +346,6 @@ function ApproversTab() {
     setSearching(false);
   }
 
-  // Add a specific person from search results as an approver
   async function addFromGal(user: GalUser) {
     setAdding(user.azure_oid);
     try {
@@ -379,14 +361,13 @@ function ApproversTab() {
       if (error) throw new Error(error.message);
       if (data?.error) throw new Error(data.error);
       flash(`${user.display_name} added as approver.`);
-      setApprovers([...approvers, { id: user.azure_oid, azure_oid: user.azure_oid, email: user.email, display_name: user.display_name, department: user.department, is_active: true, synced_at: new Date().toISOString() } as Approver]);
+      setAdded((prev) => new Set([...prev, user.azure_oid]));
     } catch (e) {
       flash('Error: ' + (e as Error).message, 'error');
     }
     setAdding(null);
   }
 
-  // Add manual approver (for non-AD users)
   async function addManual() {
     const { display_name, email, department } = manualForm;
     if (!display_name.trim() || !email.trim()) {
@@ -409,30 +390,27 @@ function ApproversTab() {
     setManualSaving(false);
   }
 
-  // Check if a GAL user is already an approver
-  const existingEmails = new Set(approvers.map((a) => a.email.toLowerCase()));
-
   return (
     <div>
       <SectionHeader
         title="Approvers"
-        subtitle="Select individuals from your Microsoft 365 directory to be approvers, or add them manually."
+        subtitle="Search your Microsoft 365 directory and choose who can approve invoices and expenses."
         msg={msg}
         msgType={msgType}
         actions={
           <button className="btn" style={s.btnSecondary}
-            onClick={() => { setShowManual((v) => !v); }}>
+            onClick={() => setShowManual((v) => !v)}>
             {showManual ? 'Cancel' : '+ Add manually'}
           </button>
         }
       />
 
-      {/* ── GAL Search panel ── */}
+      {/* GAL Search panel */}
       <div style={ap.searchPanel}>
         <div style={ap.searchKicker}>§ Search Microsoft 365 directory</div>
         <div style={ap.searchTitle}>Find & add approvers</div>
         <div style={ap.searchSub}>
-          Type a name or email to search your organisation's directory. Only selected individuals are added.
+          Type a name or email to search your organisation's directory. Only individuals you select will be added.
         </div>
         <div style={ap.searchRow}>
           <input
@@ -449,7 +427,6 @@ function ApproversTab() {
           </button>
         </div>
 
-        {/* Search results */}
         {galError && (
           <div style={ap.galError}>
             <strong>Search failed:</strong> {galError}
@@ -469,7 +446,7 @@ function ApproversTab() {
           <div style={ap.galResults}>
             <div style={ap.galResultsLabel}>{galResults.length} result{galResults.length !== 1 ? 's' : ''}</div>
             {galResults.map((user) => {
-              const alreadyAdded = existingEmails.has(user.email?.toLowerCase() ?? '');
+              const justAdded = added.has(user.azure_oid);
               return (
                 <div key={user.azure_oid} style={ap.galRow}>
                   <div style={ap.galAvatar}>
@@ -484,7 +461,7 @@ function ApproversTab() {
                     </div>
                   </div>
                   <div style={ap.galAction}>
-                    {alreadyAdded ? (
+                    {justAdded ? (
                       <span style={ap.alreadyAdded}>✓ Added</span>
                     ) : (
                       <button className="btn" style={ap.addBtn}

@@ -461,3 +461,15 @@ button, a, input, select, textarea {
   background: var(--brand-gradient);
   opacity: 0.5;
 }
+
+/* Dark mode: TopBar glass tint */
+[data-theme="dark"] .topbar-theme-toggle {
+  background: rgba(0, 198, 224, 0.12);
+  border-color: rgba(0, 198, 224, 0.25);
+}
+
+/* Hide theme label on small screens */
+@media (max-width: 640px) {
+  .topbar-theme-label { display: none; }
+  .topbar-theme-toggle { padding: 0 9px; }
+}

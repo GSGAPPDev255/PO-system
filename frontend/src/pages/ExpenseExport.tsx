@@ -71,7 +71,7 @@ export default function ExpenseExport() {
           Expense Export
         </h1>
         <p style={{ margin: '6px 0 0', color: 'var(--ink-faint)', fontSize: 13 }}>
-          Select approved expenses to export as Sage 200 GL CSV
+          Select approved expenses to export as accounting GL CSV
         </p>
       </header>
 
@@ -80,7 +80,7 @@ export default function ExpenseExport() {
         <div className="animate-rise" style={{ marginBottom: 20, padding: '14px 20px', background: 'var(--success-soft)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
             <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--success)' }}>✓ Export generated successfully</div>
-            <div style={{ fontSize: 12, color: 'var(--ink-faint)', marginTop: 3 }}>CSV file ready for Sage 200 import</div>
+            <div style={{ fontSize: 12, color: 'var(--ink-faint)', marginTop: 3 }}>CSV file ready for accounting system import</div>
           </div>
           <a href={downloadUrl} download style={{ padding: '10px 20px', background: 'var(--success)', color: '#07091A', borderRadius: 8, fontWeight: 700, fontSize: 13, textDecoration: 'none' }}>
             ⬇ Download CSV

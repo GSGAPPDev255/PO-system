@@ -74,7 +74,7 @@ export default function Login() {
             <div style={styles.statDivider} />
             <Stat value="AD" label="Azure SSO auth" />
             <div style={styles.statDivider} />
-            <Stat value="S200" label="Sage 200 export" />
+            <Stat value="CSV" label="GL export" />
             <div style={styles.statDivider} />
             <Stat value="∞" label="Full audit trail" />
           </div>

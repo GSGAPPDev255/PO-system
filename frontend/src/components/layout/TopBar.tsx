@@ -77,14 +77,18 @@ export default function TopBar({ profile, onMenuClick, isDark, onToggleTheme }: 
       <div style={styles.rightSide}>
         {/* Theme toggle */}
         <button
+          className="topbar-theme-toggle"
           style={styles.themeToggle}
           onClick={onToggleTheme}
           aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-          title={isDark ? 'Light mode' : 'Dark mode'}
+          title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
         >
           <span style={{ ...styles.themeIcon, animation: 'theme-spin 0.3s var(--ease) both' }}
             key={isDark ? 'moon' : 'sun'}>
             {isDark ? <SunIcon /> : <MoonIcon />}
+          </span>
+          <span className="topbar-theme-label" style={styles.themeLabel}>
+            {isDark ? 'Light' : 'Dark'}
           </span>
         </button>
 
@@ -182,11 +186,11 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 10,
   },
   themeToggle: {
-    display: 'flex',
+    display: 'inline-flex',
     alignItems: 'center',
-    justifyContent: 'center',
-    width: 34,
+    gap: 6,
     height: 34,
+    padding: '0 12px',
     background: 'rgba(0,180,216,0.10)',
     border: '1px solid rgba(0,180,216,0.20)',
     borderRadius: 8,
@@ -196,6 +200,14 @@ const styles: Record<string, React.CSSProperties> = {
     flexShrink: 0,
     backdropFilter: 'blur(12px)',
     WebkitBackdropFilter: 'blur(12px)',
+    whiteSpace: 'nowrap' as const,
+  },
+  themeLabel: {
+    fontSize: 12,
+    fontWeight: 500,
+    color: 'var(--accent)',
+    letterSpacing: '0.04em',
+    fontFamily: 'var(--font-ui)',
   },
   themeIcon: {
     display: 'flex',

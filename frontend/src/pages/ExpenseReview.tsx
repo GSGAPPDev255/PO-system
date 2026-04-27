@@ -346,12 +346,12 @@ export default function ExpenseReview() {
               </div>
             </div>
 
-            {field('Description', inp('description'), 'Max 75 characters for Sage 200 export')}
+            {field('Description', inp('description'), 'Max 75 characters')}
 
-            {/* Sage 200 GL fields */}
+            {/* Accounting GL fields */}
             <div style={{ borderTop: '1px solid var(--line)', margin: '16px 0', paddingTop: 16 }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--ink-faint)', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 14 }}>
-                Sage 200 Posting
+                Accounting Posting
               </div>
               {field('GL Code *', inp('gl_code'), 'e.g. 4100 — required for export')}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -415,7 +415,7 @@ export default function ExpenseReview() {
             {!isEditable && (
               <div style={{ marginTop: 8, padding: '10px 14px', background: 'rgba(255,255,255,0.04)', borderRadius: 8, fontSize: 12, color: 'var(--ink-faint)', textAlign: 'center' }}>
                 {expense.status === 'approved' ? '✓ This expense has been approved' :
-                 expense.status === 'exported' ? '✓ This expense has been exported to Sage 200' :
+                 expense.status === 'exported' ? '✓ This expense has been exported' :
                  'This expense is read-only'}
               </div>
             )}
