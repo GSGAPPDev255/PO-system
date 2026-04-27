@@ -28,9 +28,17 @@
   --brand-gradient: linear-gradient(135deg, #00B4D8 0%, #06D6A0 100%);
   --prism-gradient: linear-gradient(135deg,
     #00B4D8 0%,
-    #06D6A0 35%,
-    #7B61FF 65%,
+    #00D6E8 25%,
+    #06D6A0 50%,
+    #7B61FF 75%,
     #00B4D8 100%
+  );
+  --prism-gradient-strong: linear-gradient(90deg,
+    rgba(0, 180, 216, 0.35) 0%,
+    rgba(6, 214, 160, 0.25) 25%,
+    rgba(123, 97, 255, 0.20) 50%,
+    rgba(6, 214, 160, 0.25) 75%,
+    rgba(0, 180, 216, 0.35) 100%
   );
 
   /* Status colors */
@@ -59,14 +67,16 @@
   --shadow-lg:  0 12px 40px rgba(0,0,0,0.10), 0 0 0 1px rgba(0,0,0,0.06);
   --glow:       0 0 20px rgba(0, 168, 200, 0.18);
   --glow-lg:    0 0 40px rgba(0, 168, 200, 0.22), 0 0 80px rgba(6, 214, 160, 0.10);
+  --glow-prism: 0 0 30px rgba(0, 180, 216, 0.25), 0 0 60px rgba(6, 214, 160, 0.15);
 
   /* Glass surfaces */
-  --glass:        rgba(255, 255, 255, 0.80);
-  --glass-border: rgba(0, 0, 0, 0.07);
+  --glass:        rgba(255, 255, 255, 0.85);
+  --glass-border: rgba(0, 0, 0, 0.08);
+  --glass-strong: rgba(255, 255, 255, 0.92);
 
   /* Component surfaces */
-  --nav-bg:              rgba(255, 255, 255, 0.92);
-  --nav-border:          rgba(0, 0, 0, 0.07);
+  --nav-bg:              rgba(255, 255, 255, 0.94);
+  --nav-border:          rgba(0, 180, 216, 0.12);
   --nav-text:            rgba(13, 18, 40, 0.50);
   --nav-text-active:     rgba(13, 18, 40, 0.95);
   --nav-icon:            rgba(13, 18, 40, 0.30);
@@ -136,12 +146,14 @@
   --shadow-lg:  0 16px 48px rgba(0,0,0,0.50), 0 0 0 1px rgba(255,255,255,0.06);
   --glow:       0 0 20px rgba(0, 198, 224, 0.25);
   --glow-lg:    0 0 40px rgba(0, 198, 224, 0.30), 0 0 80px rgba(6, 214, 160, 0.15);
+  --glow-prism: 0 0 30px rgba(0, 198, 224, 0.32), 0 0 60px rgba(6, 214, 160, 0.20);
 
-  --glass:        rgba(255, 255, 255, 0.055);
-  --glass-border: rgba(255, 255, 255, 0.10);
+  --glass:        rgba(255, 255, 255, 0.070);
+  --glass-border: rgba(255, 255, 255, 0.12);
+  --glass-strong: rgba(255, 255, 255, 0.10);
 
-  --nav-bg:              rgba(5, 7, 20, 0.90);
-  --nav-border:          rgba(255, 255, 255, 0.06);
+  --nav-bg:              rgba(5, 7, 20, 0.92);
+  --nav-border:          rgba(0, 180, 216, 0.18);
   --nav-text:            rgba(240, 244, 255, 0.50);
   --nav-text-active:     rgba(240, 244, 255, 0.95);
   --nav-icon:            rgba(240, 244, 255, 0.35);

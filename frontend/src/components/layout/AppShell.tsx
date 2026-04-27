@@ -59,22 +59,24 @@ const styles: Record<string, React.CSSProperties> = {
     overflow: 'hidden',
     background: 'var(--paper)',
     position: 'relative',
+    backgroundImage: 'radial-gradient(ellipse 100% 80% at 50% 0%, rgba(0,180,216,0.08) 0%, transparent 50%)',
   },
   orb: {
     position: 'fixed',
     borderRadius: '50%',
     pointerEvents: 'none',
     zIndex: 0,
+    filter: 'blur(40px)',
   },
   orbTL: {
     top: -200, left: -100,
-    width: 600, height: 600,
-    background: 'radial-gradient(circle, rgba(0,168,200,0.07) 0%, transparent 65%)',
+    width: 700, height: 700,
+    background: 'radial-gradient(circle, rgba(0,180,216,0.15) 0%, rgba(0,180,216,0.05) 45%, transparent 75%)',
   },
   orbBR: {
     bottom: -200, right: -100,
-    width: 500, height: 500,
-    background: 'radial-gradient(circle, rgba(6,214,160,0.05) 0%, transparent 65%)',
+    width: 600, height: 600,
+    background: 'radial-gradient(circle, rgba(6,214,160,0.12) 0%, rgba(6,214,160,0.04) 50%, transparent 75%)',
   },
   overlay: {
     position: 'fixed',
