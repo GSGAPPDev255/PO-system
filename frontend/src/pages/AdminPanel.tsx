@@ -1,7 +1,7 @@
 /**
  * AdminPanel — four tabs:
  *  1. Users      — view all profiles, invite new users, change roles, activate/deactivate
- *  2. Approvers  — manage approver list, edit/add manual entries, trigger AD sync
+ *  2. Approvers  — search Azure AD to add approvers, or manually add external approvers
  *  3. Alerts     — configure CC emails, admin notification address
  *  4. System     — view function health, trigger email-intake manually
  */
@@ -311,20 +311,13 @@ interface GalUser {
 interface EditApprover { display_name: string; email: string; department: string }
 
 function ApproversTab() {
-  const [approvers, setApprovers]       = useState<Approver[]>([]);
-  const [loading, setLoading]           = useState(true);
-  const [showInactive, setShowInactive] = useState(false);
-  const [removing, setRemoving]         = useState<string | null>(null);
-  const [editingId, setEditingId]       = useState<string | null>(null);
-  const [editForm, setEditForm]         = useState<EditApprover>({ display_name: '', email: '', department: '' });
-  const [editSaving, setEditSaving]     = useState(false);
-
   // GAL search state
   const [searchQuery, setSearchQuery]   = useState('');
   const [searching, setSearching]       = useState(false);
   const [galResults, setGalResults]     = useState<GalUser[] | null>(null);
   const [galError, setGalError]         = useState<string | null>(null);
   const [adding, setAdding]             = useState<string | null>(null);
+  const [approvers, setApprovers]       = useState<Approver[]>([]);
 
   // Manual add state
   const [showManual, setShowManual]     = useState(false);
@@ -339,22 +332,17 @@ function ApproversTab() {
     setTimeout(() => setMsg(''), 4000);
   }
 
-  const load = useCallback(async (includeInactive = false) => {
-    setLoading(true);
-    try {
-      let query = supabase.from('approvers').select('*').order('display_name');
-      if (!includeInactive) query = query.eq('is_active', true);
-      const { data, error } = await query;
-      if (error) { flash('Could not load approvers: ' + error.message, 'error'); }
-      setApprovers((data as Approver[]) ?? []);
-    } catch (e) {
-      flash('Load failed: ' + (e as Error).message, 'error');
-    } finally {
-      setLoading(false);
-    }
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data, error } = await supabase.from('approvers').select('*').order('display_name').eq('is_active', true);
+        if (error) { flash('Could not load approvers: ' + error.message, 'error'); }
+        setApprovers((data as Approver[]) ?? []);
+      } catch (e) {
+        flash('Load failed: ' + (e as Error).message, 'error');
+      }
+    })();
   }, []);
-
-  useEffect(() => { load(showInactive); }, [load, showInactive]);
 
   // Search the GAL via admin-actions edge function
   async function searchGal() {
@@ -391,7 +379,7 @@ function ApproversTab() {
       if (error) throw new Error(error.message);
       if (data?.error) throw new Error(data.error);
       flash(`${user.display_name} added as approver.`);
-      await load(showInactive);
+      setApprovers([...approvers, { id: user.azure_oid, azure_oid: user.azure_oid, email: user.email, display_name: user.display_name, department: user.department, is_active: true, synced_at: new Date().toISOString() } as Approver]);
     } catch (e) {
       flash('Error: ' + (e as Error).message, 'error');
     }
@@ -417,69 +405,25 @@ function ApproversTab() {
       flash('Approver added.');
       setManualForm({ display_name: '', email: '', department: '' });
       setShowManual(false);
-      await load(showInactive);
     }
     setManualSaving(false);
-  }
-
-  async function toggleApprover(id: string, current: boolean) {
-    setRemoving(id);
-    const { error } = await supabase.from('approvers').update({ is_active: !current }).eq('id', id);
-    if (error) flash('Error: ' + error.message, 'error');
-    else { flash('Approver status updated.'); await load(showInactive); }
-    setRemoving(null);
-  }
-
-  function startEdit(a: Approver) {
-    setEditingId(a.id);
-    setEditForm({ display_name: a.display_name, email: a.email, department: a.department ?? '' });
-    setShowManual(false);
-  }
-
-  function cancelEdit() {
-    setEditingId(null);
-    setEditForm({ display_name: '', email: '', department: '' });
-  }
-
-  async function saveEdit(id: string) {
-    if (!editForm.display_name.trim() || !editForm.email.trim()) {
-      flash('Name and email are required.', 'error'); return;
-    }
-    setEditSaving(true);
-    const { error } = await supabase.from('approvers').update({
-      display_name: editForm.display_name.trim(),
-      email:        editForm.email.trim().toLowerCase(),
-      department:   editForm.department.trim() || null,
-    }).eq('id', id);
-    if (error) flash('Error: ' + error.message, 'error');
-    else { flash('Approver updated.'); cancelEdit(); await load(showInactive); }
-    setEditSaving(false);
   }
 
   // Check if a GAL user is already an approver
   const existingEmails = new Set(approvers.map((a) => a.email.toLowerCase()));
 
-  if (loading) return <div style={s.loading}>Loading approvers…</div>;
-
   return (
     <div>
       <SectionHeader
         title="Approvers"
-        subtitle="Pick individuals from your Microsoft 365 directory. Only the people you choose will appear as approvers."
+        subtitle="Select individuals from your Microsoft 365 directory to be approvers, or add them manually."
         msg={msg}
         msgType={msgType}
         actions={
-          <>
-            <label style={s.toggleLabel}>
-              <input type="checkbox" checked={showInactive}
-                onChange={(e) => setShowInactive(e.target.checked)} style={{ marginRight: 6 }} />
-              Show inactive
-            </label>
-            <button className="btn" style={s.btnSecondary}
-              onClick={() => { setShowManual((v) => !v); cancelEdit(); }}>
-              {showManual ? 'Cancel' : '+ Add manually'}
-            </button>
-          </>
+          <button className="btn" style={s.btnSecondary}
+            onClick={() => { setShowManual((v) => !v); }}>
+            {showManual ? 'Cancel' : '+ Add manually'}
+          </button>
         }
       />
 
@@ -591,93 +535,6 @@ function ApproversTab() {
           </div>
         </div>
       )}
-
-      {/* ── Current approvers list ── */}
-      <div style={s.card}>
-        <table style={s.table}>
-          <thead>
-            <tr>
-              <th style={s.th}>Name</th>
-              <th style={s.th}>Email</th>
-              <th style={s.th}>Department</th>
-              <th style={s.th}>Source</th>
-              <th style={s.th}>Status</th>
-              <th style={{ ...s.th, textAlign: 'right' }}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {approvers.map((a, idx) => (
-              editingId === a.id ? (
-                <tr key={a.id} style={{ ...s.row, background: 'var(--accent-soft)' }}>
-                  <td style={s.td}>
-                    <input style={{ ...s.input, width: '100%' }} value={editForm.display_name}
-                      placeholder="Full name"
-                      onChange={(e) => setEditForm({ ...editForm, display_name: e.target.value })} />
-                  </td>
-                  <td style={s.td}>
-                    <input style={{ ...s.input, width: '100%' }} type="email" value={editForm.email}
-                      placeholder="email@school.com"
-                      onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} />
-                  </td>
-                  <td style={s.td}>
-                    <input style={{ ...s.input, width: '100%' }} value={editForm.department}
-                      placeholder="Department"
-                      onChange={(e) => setEditForm({ ...editForm, department: e.target.value })} />
-                  </td>
-                  <td style={s.td} colSpan={2}>
-                    <span style={a.azure_oid ? s.badgeAzure : s.badgeManual}>
-                      {a.azure_oid ? 'Azure AD' : 'Manual'}
-                    </span>
-                  </td>
-                  <td style={{ ...s.td, textAlign: 'right' }}>
-                    <div style={{ display: 'inline-flex', gap: 6 }}>
-                      <button className="btn" style={s.btnPrimary} disabled={editSaving} onClick={() => saveEdit(a.id)}>
-                        {editSaving ? 'Saving…' : 'Save'}
-                      </button>
-                      <button className="btn" style={s.btnSecondary} onClick={cancelEdit}>Cancel</button>
-                    </div>
-                  </td>
-                </tr>
-              ) : (
-                <tr key={a.id} style={{ ...s.row, ...(idx % 2 === 1 ? s.rowAlt : {}), opacity: a.is_active ? 1 : 0.55 }}>
-                  <td style={s.td}><div style={s.name}>{a.display_name}</div></td>
-                  <td style={{ ...s.td, ...s.mono }}>{a.email}</td>
-                  <td style={s.td}>{a.department ?? <span style={s.faint}>—</span>}</td>
-                  <td style={s.td}>
-                    <span style={a.azure_oid ? s.badgeAzure : s.badgeManual}>
-                      {a.azure_oid ? 'Azure AD' : 'Manual'}
-                    </span>
-                  </td>
-                  <td style={s.td}>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
-                      <span style={{ ...s.statusDot, background: a.is_active ? 'var(--success)' : 'var(--ink-faint)' }} />
-                      <span style={{ fontSize: 12, color: a.is_active ? 'var(--ink)' : 'var(--ink-faint)' }}>
-                        {a.is_active ? 'Active' : 'Inactive'}
-                      </span>
-                    </span>
-                  </td>
-                  <td style={{ ...s.td, textAlign: 'right' }}>
-                    <div style={{ display: 'inline-flex', gap: 6 }}>
-                      <button className="btn" style={s.btnSecondary} onClick={() => startEdit(a)}>Edit</button>
-                      <button className="btn"
-                        style={a.is_active ? s.btnDanger : s.btnSecondary}
-                        disabled={removing === a.id}
-                        onClick={() => toggleApprover(a.id, a.is_active)}>
-                        {removing === a.id ? '…' : a.is_active ? 'Remove' : 'Reactivate'}
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              )
-            ))}
-          </tbody>
-        </table>
-        {approvers.length === 0 && (
-          <div style={s.empty}>
-            No approvers yet. Search above to find people in your Microsoft 365 directory.
-          </div>
-        )}
-      </div>
     </div>
   );
 }
