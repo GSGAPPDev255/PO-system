@@ -50,7 +50,7 @@ export default function FinanceDashboard() {
   const filtered = useMemo(() => {
     let result = invoices;
     if (companyFilter !== 'all') {
-      result = result.filter((i) => (i as Record<string, unknown>).company === companyFilter);
+      result = result.filter((i) => (i as unknown as Record<string, unknown>).company === companyFilter);
     }
     if (!search.trim()) return result;
     const q = search.trim().toLowerCase();
@@ -225,7 +225,7 @@ export default function FinanceDashboard() {
                         {inv.account_number && <div style={styles.accountNum}>{inv.account_number}</div>}
                       </td>
                       <td style={styles.td}>
-                        <CompanyBadge company={(inv as Record<string, unknown>).company as string | null} />
+                        <CompanyBadge company={(inv as unknown as Record<string, unknown>).company as string | null} />
                       </td>
                       <td style={{ ...styles.td, ...styles.mono }}>{inv.transaction_reference ?? <span style={styles.muted}>—</span>}</td>
                       <td style={styles.td}>{inv.transaction_date ? fmtDate(inv.transaction_date) : <span style={styles.muted}>—</span>}</td>
