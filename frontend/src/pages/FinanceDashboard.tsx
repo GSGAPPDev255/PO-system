@@ -15,6 +15,13 @@ const STATUS_FILTERS: { label: string; value: InvoiceStatus | 'all' }[] = [
   { label: 'Exported',         value: 'exported' },
 ];
 
+const COMPANY_FILTERS: { label: string; value: string }[] = [
+  { label: 'All Schools',       value: 'all' },
+  { label: 'Kew House',         value: 'kew_house' },
+  { label: 'Gardener Schools',  value: 'gardener_schools' },
+  { label: 'Maida Vale',        value: 'maida_vale' },
+];
+
 function fmtDate(raw: string): string {
   try {
     const normalised = raw.replace(/(\.\d{3})\d+/, '$1');
@@ -32,6 +39,7 @@ function fmtMoney(amount: number | null | undefined): string {
 
 export default function FinanceDashboard() {
   const [statusFilter, setStatusFilter] = useState<InvoiceStatus | 'all'>('all');
+  const [companyFilter, setCompanyFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
   const navigate = useNavigate();
 
@@ -40,14 +48,18 @@ export default function FinanceDashboard() {
   );
 
   const filtered = useMemo(() => {
-    if (!search.trim()) return invoices;
+    let result = invoices;
+    if (companyFilter !== 'all') {
+      result = result.filter((i) => (i as Record<string, unknown>).company === companyFilter);
+    }
+    if (!search.trim()) return result;
     const q = search.trim().toLowerCase();
-    return invoices.filter((i) =>
+    return result.filter((i) =>
       (i.supplier_name ?? '').toLowerCase().includes(q) ||
       (i.transaction_reference ?? '').toLowerCase().includes(q) ||
       (i.account_number ?? '').toLowerCase().includes(q),
     );
-  }, [invoices, search]);
+  }, [invoices, search, companyFilter]);
 
   const totals = useMemo(() => {
     let gross = 0;
@@ -118,6 +130,26 @@ export default function FinanceDashboard() {
 
       {/* Filter + search row */}
       <div style={styles.controls} className="animate-rise delay-2 toolbar-row">
+
+        {/* Company filter */}
+        <div style={{ ...styles.tabs, marginBottom: 8 }} role="tablist" className="filter-chips">
+          {COMPANY_FILTERS.map((f) => (
+            <button
+              key={f.value}
+              role="tab"
+              aria-selected={companyFilter === f.value}
+              style={{
+                ...styles.tab,
+                ...(companyFilter === f.value ? { ...styles.tabActive, background: 'var(--accent-3)', borderColor: 'var(--accent-3)' } : {}),
+              }}
+              onClick={() => setCompanyFilter(f.value)}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Status filter */}
         <div style={styles.tabs} role="tablist" className="filter-chips">
           {STATUS_FILTERS.map((f) => (
             <button
@@ -166,6 +198,7 @@ export default function FinanceDashboard() {
               <thead>
                 <tr>
                   <th style={styles.th}>Supplier</th>
+                  <th style={styles.th}>School</th>
                   <th style={styles.th}>Invoice Ref</th>
                   <th style={styles.th}>Invoice Date</th>
                   <th style={{ ...styles.th, textAlign: 'right' }}>Gross</th>
@@ -190,6 +223,9 @@ export default function FinanceDashboard() {
                       <td style={styles.td}>
                         <div style={styles.supplierName}>{inv.supplier_name ?? '—'}</div>
                         {inv.account_number && <div style={styles.accountNum}>{inv.account_number}</div>}
+                      </td>
+                      <td style={styles.td}>
+                        <CompanyBadge company={(inv as Record<string, unknown>).company as string | null} />
                       </td>
                       <td style={{ ...styles.td, ...styles.mono }}>{inv.transaction_reference ?? <span style={styles.muted}>—</span>}</td>
                       <td style={styles.td}>{inv.transaction_date ? fmtDate(inv.transaction_date) : <span style={styles.muted}>—</span>}</td>
@@ -235,6 +271,28 @@ export default function FinanceDashboard() {
         </div>
       )}
     </div>
+  );
+}
+
+const COMPANY_LABELS: Record<string, { label: string; color: string }> = {
+  kew_house:        { label: 'Kew House',        color: '#7b61ff' },
+  gardener_schools: { label: 'Gardener Schools',  color: '#00b4d8' },
+  maida_vale:       { label: 'Maida Vale',        color: '#06d6a0' },
+};
+
+function CompanyBadge({ company }: { company: string | null }) {
+  if (!company) return <span style={{ color: 'var(--ink-muted)', fontSize: 12 }}>—</span>;
+  const meta = COMPANY_LABELS[company];
+  if (!meta) return <span style={{ color: 'var(--ink-muted)', fontSize: 12 }}>{company}</span>;
+  return (
+    <span style={{
+      display: 'inline-block', fontSize: 11, fontWeight: 600, letterSpacing: '0.04em',
+      padding: '2px 8px', borderRadius: 20,
+      background: `${meta.color}22`, color: meta.color, border: `1px solid ${meta.color}44`,
+      whiteSpace: 'nowrap',
+    }}>
+      {meta.label}
+    </span>
   );
 }
 

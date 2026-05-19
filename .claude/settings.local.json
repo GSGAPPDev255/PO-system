@@ -36,7 +36,24 @@
       "Bash(npm run *)",
       "mcp__5c3a39e0-cc4f-462e-88a9-6dcb6d73bd7e__get_project",
       "Bash(import\")",
-      "Bash(gh workflow *)"
+      "Bash(gh workflow *)",
+      "Bash(gh secret *)",
+      "Bash(curl -s -X POST \"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=AIzaSyBZdkNo_IGzEd1gQTY8fLMr_zfelYzn7-A\" -H \"Content-Type: application/json\" -d '{\"contents\":[{\"parts\":[{\"text\":\"Say hello in one word\"}]}]}')",
+      "Bash(curl -s -X POST https://alcfqmolvnjnmylopsgb.supabase.co/functions/v1/gemini-processor -H 'Content-Type: application/json' -d '{\"purchase_order_id\":\"test\",\"invoice_file_id\":\"test\",\"storage_path\":\"test\",\"mime_type\":\"application/pdf\"}' -w '\\\\nHTTP: %{http_code}\\\\n')",
+      "Bash(curl -s -X POST https://alcfqmolvnjnmylopsgb.supabase.co/functions/v1/gemini-processor -H 'Content-Type: application/json' -d '{\"purchase_order_id\":\"9eb9cb82-28ea-41ca-8d94-7e0f3011ae64\",\"invoice_file_id\":\"b3c19d4f-4fb1-4a19-9a14-f1c0608a1662\",\"storage_path\":\"2026/04/9eb9cb82-28ea-41ca-8d94-7e0f3011ae64/School_Invoice_Pencils.pdf\",\"mime_type\":\"application/pdf\"}' -w '\\\\nHTTP: %{http_code}\\\\n' --max-time 60)",
+      "Bash(curl -s -X POST https://alcfqmolvnjnmylopsgb.supabase.co/functions/v1/email-intake -H 'Content-Type: application/json' -d '{}' -w '\\\\nHTTP: %{http_code}\\\\n' --max-time 60)",
+      "Bash(curl -s -X POST https://alcfqmolvnjnmylopsgb.supabase.co/functions/v1/email-intake -H 'Content-Type: application/json' -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFsY2ZxbW9sdm5qbm15bG9wc2diIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU2OTA1MzAsImV4cCI6MjA5MTI2NjUzMH0.c8-NRNvs9hy3QUsyhmvTRc0ZvY1DTIVWifxUGuWaRUc' -d '{}' -w '\\\\nHTTP: %{http_code}\\\\n' --max-time 60)",
+      "Bash(git add *)",
+      "Bash(git commit -m 'Clean approvers tab, add dark mode label, remove Sage 200 references *)",
+      "mcp__5c3a39e0-cc4f-462e-88a9-6dcb6d73bd7e__get_project_url",
+      "mcp__5c3a39e0-cc4f-462e-88a9-6dcb6d73bd7e__list_tables",
+      "Bash(git remote *)",
+      "Bash(git push *)",
+      "Bash(curl -s -X POST https://alcfqmolvnjnmylopsgb.supabase.co/functions/v1/email-intake -H \"Content-Type: application/json\" -d \"{}\")",
+      "Bash(git commit -m ' *)",
+      "Bash(node_modules\\\\.bin\\\\tsc --noEmit)",
+      "Bash(./node_modules/.bin/tsc --noEmit)",
+      "Bash(npx vite *)"
     ]
   }
 }

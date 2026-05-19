@@ -305,15 +305,29 @@ interface Approver {
   display_name: string;
   email: string;
   department: string | null;
+  company: string | null;
   is_active: boolean;
   synced_at: string;
 }
+
+const COMPANY_OPTIONS = [
+  { value: '',                 label: 'Group-wide (all schools)' },
+  { value: 'kew_house',        label: 'Kew House School' },
+  { value: 'gardener_schools', label: 'Gardener Schools' },
+  { value: 'maida_vale',       label: 'Maida Vale School' },
+];
+
+const COMPANY_LABELS: Record<string, string> = {
+  kew_house:        'Kew House',
+  gardener_schools: 'Gardener Schools',
+  maida_vale:       'Maida Vale',
+};
 
 function ApproversTab() {
   const [approvers, setApprovers]       = useState<Approver[]>([]);
   const [loading, setLoading]           = useState(true);
   const [showForm, setShowForm]         = useState(false);
-  const [form, setForm]                 = useState({ display_name: '', email: '', department: '' });
+  const [form, setForm]                 = useState({ display_name: '', email: '', department: '', company: '' });
   const [saving, setSaving]             = useState(false);
   const [toggling, setToggling]         = useState<string | null>(null);
   const [msg, setMsg]                   = useState('');
@@ -338,7 +352,7 @@ function ApproversTab() {
   useEffect(() => { load(); }, [load]);
 
   async function addApprover() {
-    const { display_name, email, department } = form;
+    const { display_name, email, department, company } = form;
     if (!display_name.trim() || !email.trim()) {
       flash('Name and email are required.', 'error'); return;
     }
@@ -347,13 +361,14 @@ function ApproversTab() {
       display_name: display_name.trim(),
       email:        email.trim().toLowerCase(),
       department:   department.trim() || null,
+      company:      company || null,
       is_active:    true,
       synced_at:    new Date().toISOString(),
     });
     if (error) flash('Error: ' + error.message, 'error');
     else {
       flash(`${display_name.trim()} added as approver.`);
-      setForm({ display_name: '', email: '', department: '' });
+      setForm({ display_name: '', email: '', department: '', company: '' });
       setShowForm(false);
       await load();
     }
@@ -407,13 +422,22 @@ function ApproversTab() {
               <input style={s.input} value={form.department} placeholder="e.g. Finance"
                 onChange={(e) => setForm({ ...form, department: e.target.value })} />
             </div>
+            <div style={s.formGroup}>
+              <label style={s.label}>School *</label>
+              <select style={s.input} value={form.company}
+                onChange={(e) => setForm({ ...form, company: e.target.value })}>
+                {COMPANY_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            </div>
           </div>
           <div style={{ display: 'flex', gap: 10 }}>
             <button className="btn" style={s.btnPrimary} disabled={saving} onClick={addApprover}>
               {saving ? 'Saving…' : 'Add approver →'}
             </button>
             <button className="btn" style={s.btnSecondary}
-              onClick={() => { setShowForm(false); setForm({ display_name: '', email: '', department: '' }); }}>
+              onClick={() => { setShowForm(false); setForm({ display_name: '', email: '', department: '', company: '' }); }}>
               Cancel
             </button>
           </div>
@@ -430,6 +454,7 @@ function ApproversTab() {
               <tr>
                 <th style={s.th}>Name</th>
                 <th style={s.th}>Email</th>
+                <th style={s.th}>School</th>
                 <th style={s.th}>Department</th>
                 <th style={s.th}>Status</th>
                 <th style={{ ...s.th, textAlign: 'right' }}>Actions</th>
@@ -445,6 +470,16 @@ function ApproversTab() {
                     </div>
                   </td>
                   <td style={{ ...s.td, ...s.mono }}>{a.email}</td>
+                  <td style={s.td}>
+                    {a.company
+                      ? <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 20, background: 'var(--accent-soft)', color: 'var(--accent-text)', border: '1px solid var(--border)' }}>
+                          {COMPANY_LABELS[a.company] ?? a.company}
+                        </span>
+                      : <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 20, background: 'rgba(139,92,246,0.1)', color: '#A78BFA', border: '1px solid rgba(139,92,246,0.25)' }}>
+                          Group-wide
+                        </span>
+                    }
+                  </td>
                   <td style={{ ...s.td, color: 'var(--ink-muted)', fontSize: 12.5 }}>
                     {a.department ?? <span style={s.faint}>—</span>}
                   </td>

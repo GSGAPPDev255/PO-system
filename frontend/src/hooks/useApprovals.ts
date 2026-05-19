@@ -18,15 +18,28 @@ export function useAuditLog(poId: string) {
   });
 }
 
-export function useApprovers() {
+export function useApprovers(company?: string | null) {
   return useQuery({
-    queryKey: ['approvers'],
+    queryKey: ['approvers', company ?? 'all'],
     queryFn: async () => {
-      const { data, error } = await supabase
+      let query = supabase
         .from('approvers')
         .select('*')
         .eq('is_active', true)
         .order('display_name');
+
+      // If a company is specified, return group-wide approvers (company IS NULL)
+      // plus approvers specific to that company
+      if (company) {
+        query = supabase
+          .from('approvers')
+          .select('*')
+          .eq('is_active', true)
+          .or(`company.is.null,company.eq.${company}`)
+          .order('display_name');
+      }
+
+      const { data, error } = await query;
       if (error) throw error;
       return data;
     },

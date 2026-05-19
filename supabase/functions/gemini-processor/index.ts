@@ -21,14 +21,46 @@ Deno.serve(async (req) => {
   const corsRes = handleCors(req);
   if (corsRes) return corsRes;
 
-  let payload: ProcessorPayload;
-  try {
-    payload = await req.json();
-  } catch {
-    return new Response(JSON.stringify({ error: 'Invalid JSON payload' }), {
-      status: 400,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+  let payload: ProcessorPayload | null = null;
+
+  // Try to parse the body — empty body (manual test trigger) is fine
+  const bodyText = await req.text();
+  if (bodyText.trim()) {
+    try {
+      payload = JSON.parse(bodyText) as ProcessorPayload;
+    } catch {
+      return new Response(JSON.stringify({ error: 'Invalid JSON payload' }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+  }
+
+  // No payload supplied — find the most recent PO without an OCR extraction
+  if (!payload || !payload.purchase_order_id) {
+    const { data: pending, error: pendingErr } = await supabaseAdmin
+      .from('purchase_orders')
+      .select('id, invoice_file_id, invoice_files!inner(storage_path, mime_type)')
+      .not('invoice_file_id', 'is', null)
+      .not('id', 'in', `(SELECT purchase_order_id FROM ocr_extractions)`)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (pendingErr || !pending) {
+      return new Response(
+        JSON.stringify({ message: 'No unprocessed invoices found. Send an invoice email first.' }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      );
+    }
+
+    const file = (pending as Record<string, unknown>).invoice_files as { storage_path: string; mime_type: string };
+    payload = {
+      purchase_order_id: pending.id as string,
+      invoice_file_id:   pending.invoice_file_id as string,
+      storage_path:      file.storage_path,
+      mime_type:         file.mime_type,
+    };
   }
 
   const { purchase_order_id, invoice_file_id, storage_path, mime_type } = payload;
