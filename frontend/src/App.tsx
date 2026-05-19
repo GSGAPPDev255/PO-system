@@ -256,84 +256,42 @@ function AuthCallback({ onProfile }: { onProfile: (p: Profile | null) => void })
 
   useEffect(() => {
     let cancelled = false;
-    let subscription: ReturnType<typeof supabase.auth.onAuthStateChange>['data']['subscription'] | null = null;
-    let timeout: ReturnType<typeof setTimeout> | null = null;
 
-    function handleSession(userId: string) {
-      console.log('[AuthCallback] Fetching profile for userId:', userId);
-      supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .single()
-        .then(
-          ({ data, error }) => {
-            if (cancelled) return;
-            console.log('[AuthCallback] Profile fetch result:', { data, error });
-            if (error) {
-              console.error('[AuthCallback] Profile fetch error:', error);
-              onProfile(null);
-              navigate('/login', { replace: true });
-              return;
-            }
-            const p = (data as Profile) ?? null;
-            console.log('[AuthCallback] Setting profile:', p?.email);
-            setCachedProfile(p);
-            onProfile(p);
-            const dest = p?.role === 'staff' ? '/my-expenses' : '/dashboard';
-            console.log('[AuthCallback] Navigating to:', dest);
-            navigate(dest, { replace: true });
-          },
-        );
-    }
+    // Directly exchange the OAuth code for a session — much faster than
+    // waiting for getSession() + onAuthStateChange chain.
+    supabase.auth.exchangeCodeForSession(window.location.href).then(
+      async ({ data: { session }, error }) => {
+        if (cancelled) return;
 
-    console.log('[AuthCallback] Checking session...');
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      console.log('[AuthCallback] getSession returned:', { userId: session?.user?.id, email: session?.user?.email });
-      if (cancelled) return;
-
-      if (session?.user) {
-        console.log('[AuthCallback] Session found, fetching profile');
-        handleSession(session.user.id);
-        return;
-      }
-
-      // Session not ready — wait for SIGNED_IN event (PKCE code exchange in progress)
-      console.log('[AuthCallback] No session yet, waiting for SIGNED_IN event');
-      const { data: { subscription: sub } } = supabase.auth.onAuthStateChange(
-        (event, s) => {
-          console.log('[AuthCallback] onAuthStateChange event:', event, { userId: s?.user?.id });
-          if (cancelled) return;
-          if (event === 'SIGNED_IN' && s?.user) {
-            console.log('[AuthCallback] SIGNED_IN event received');
-            if (timeout) clearTimeout(timeout);
-            sub.unsubscribe();
-            handleSession(s.user.id);
-          } else if (event === 'SIGNED_OUT') {
-            console.log('[AuthCallback] SIGNED_OUT event received');
-            if (timeout) clearTimeout(timeout);
-            sub.unsubscribe();
-            navigate('/login', { replace: true });
-          }
-        },
-      );
-      subscription = sub;
-
-      // Safety timeout in case code exchange fails
-      timeout = setTimeout(() => {
-        console.log('[AuthCallback] 15s timeout reached, redirecting to login');
-        if (!cancelled) {
-          sub.unsubscribe();
+        if (error || !session?.user) {
+          console.error('[AuthCallback] Code exchange failed:', error?.message);
           navigate('/login', { replace: true });
+          return;
         }
-      }, 15000);
-    });
 
-    return () => {
-      cancelled = true;
-      if (subscription) subscription.unsubscribe();
-      if (timeout) clearTimeout(timeout);
-    };
+        // Fetch profile (auto-created by DB trigger on first login)
+        const { data, error: profileError } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', session.user.id)
+          .single();
+
+        if (cancelled) return;
+
+        if (profileError || !data) {
+          console.error('[AuthCallback] Profile fetch failed:', profileError?.message);
+          navigate('/login', { replace: true });
+          return;
+        }
+
+        const p = data as Profile;
+        setCachedProfile(p);
+        onProfile(p);
+        navigate(p.role === 'staff' ? '/my-expenses' : '/dashboard', { replace: true });
+      },
+    );
+
+    return () => { cancelled = true; };
   }, [navigate, onProfile]);
 
   return <div style={styles.center}><div style={styles.spinner} /></div>;
