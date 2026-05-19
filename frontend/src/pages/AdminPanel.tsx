@@ -300,80 +300,49 @@ function UsersTab() {
 
 // ─── Approvers Tab ────────────────────────────────────────────────────────────
 
-interface GalUser {
-  azure_oid: string;
+interface Approver {
+  id: string;
   display_name: string;
   email: string;
   department: string | null;
-  job_title: string | null;
+  is_active: boolean;
+  synced_at: string;
 }
 
 function ApproversTab() {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searching, setSearching]     = useState(false);
-  const [galResults, setGalResults]   = useState<GalUser[] | null>(null);
-  const [galError, setGalError]       = useState<string | null>(null);
-  const [adding, setAdding]           = useState<string | null>(null);
-  const [added, setAdded]             = useState<Set<string>>(new Set());
-
-  const [showManual, setShowManual]     = useState(false);
-  const [manualForm, setManualForm]     = useState({ display_name: '', email: '', department: '' });
-  const [manualSaving, setManualSaving] = useState(false);
-
-  const [msg, setMsg]       = useState('');
-  const [msgType, setMsgType] = useState<'success' | 'error'>('success');
+  const [approvers, setApprovers]       = useState<Approver[]>([]);
+  const [loading, setLoading]           = useState(true);
+  const [showForm, setShowForm]         = useState(false);
+  const [form, setForm]                 = useState({ display_name: '', email: '', department: '' });
+  const [saving, setSaving]             = useState(false);
+  const [toggling, setToggling]         = useState<string | null>(null);
+  const [msg, setMsg]                   = useState('');
+  const [msgType, setMsgType]           = useState<'success' | 'error'>('success');
 
   function flash(m: string, type: 'success' | 'error' = 'success') {
     setMsg(m); setMsgType(type);
     setTimeout(() => setMsg(''), 4000);
   }
 
-  async function searchGal() {
-    if (!searchQuery.trim() || searchQuery.trim().length < 2) return;
-    setSearching(true);
-    setGalResults(null);
-    setGalError(null);
-    try {
-      const { data, error } = await supabase.functions.invoke('admin-actions', {
-        body: { action: 'search_gal', query: searchQuery.trim() },
-      });
-      if (error) throw new Error(error.message);
-      if (data?.error) throw new Error(data.error);
-      setGalResults(data.users ?? []);
-    } catch (e) {
-      setGalError((e as Error).message);
-    }
-    setSearching(false);
-  }
+  const load = useCallback(async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('approvers')
+      .select('*')
+      .order('display_name');
+    if (error) flash('Could not load approvers: ' + error.message, 'error');
+    setApprovers((data as Approver[]) ?? []);
+    setLoading(false);
+  }, []);
 
-  async function addFromGal(user: GalUser) {
-    setAdding(user.azure_oid);
-    try {
-      const { data, error } = await supabase.functions.invoke('admin-actions', {
-        body: {
-          action:       'add_approver',
-          azure_oid:    user.azure_oid,
-          display_name: user.display_name,
-          email:        user.email,
-          department:   user.department,
-        },
-      });
-      if (error) throw new Error(error.message);
-      if (data?.error) throw new Error(data.error);
-      flash(`${user.display_name} added as approver.`);
-      setAdded((prev) => new Set([...prev, user.azure_oid]));
-    } catch (e) {
-      flash('Error: ' + (e as Error).message, 'error');
-    }
-    setAdding(null);
-  }
+  useEffect(() => { load(); }, [load]);
 
-  async function addManual() {
-    const { display_name, email, department } = manualForm;
+  async function addApprover() {
+    const { display_name, email, department } = form;
     if (!display_name.trim() || !email.trim()) {
       flash('Name and email are required.', 'error'); return;
     }
-    setManualSaving(true);
+    setSaving(true);
     const { error } = await supabase.from('approvers').insert({
       display_name: display_name.trim(),
       email:        email.trim().toLowerCase(),
@@ -383,295 +352,148 @@ function ApproversTab() {
     });
     if (error) flash('Error: ' + error.message, 'error');
     else {
-      flash('Approver added.');
-      setManualForm({ display_name: '', email: '', department: '' });
-      setShowManual(false);
+      flash(`${display_name.trim()} added as approver.`);
+      setForm({ display_name: '', email: '', department: '' });
+      setShowForm(false);
+      await load();
     }
-    setManualSaving(false);
+    setSaving(false);
+  }
+
+  async function toggleActive(approver: Approver) {
+    setToggling(approver.id);
+    const { error } = await supabase
+      .from('approvers')
+      .update({ is_active: !approver.is_active })
+      .eq('id', approver.id);
+    if (error) flash('Error: ' + error.message, 'error');
+    else { flash(`${approver.display_name} ${approver.is_active ? 'deactivated' : 'activated'}.`); await load(); }
+    setToggling(null);
   }
 
   return (
     <div>
       <SectionHeader
         title="Approvers"
-        subtitle="Search your Microsoft 365 directory and choose who can approve invoices and expenses."
+        subtitle="Manage who can approve invoices. Add or deactivate approvers at any time."
         msg={msg}
         msgType={msgType}
         actions={
-          <button className="btn" style={s.btnSecondary}
-            onClick={() => setShowManual((v) => !v)}>
-            {showManual ? 'Cancel' : '+ Add manually'}
+          <button className="btn" style={s.btnPrimary} onClick={() => setShowForm((v) => !v)}>
+            {showForm ? 'Cancel' : '+ Add approver'}
           </button>
         }
       />
 
-      {/* GAL Search panel */}
-      <div style={ap.searchPanel}>
-        <div style={ap.searchKicker}>§ Search Microsoft 365 directory</div>
-        <div style={ap.searchTitle}>Find & add approvers</div>
-        <div style={ap.searchSub}>
-          Type a name or email to search your organisation's directory. Only individuals you select will be added.
-        </div>
-        <div style={ap.searchRow}>
-          <input
-            style={ap.searchInput}
-            type="text"
-            placeholder="e.g. Jane Smith or jane@school.com"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && searchGal()}
-          />
-          <button className="btn" style={s.btnPrimary} onClick={searchGal}
-            disabled={searching || searchQuery.trim().length < 2}>
-            {searching ? 'Searching…' : 'Search →'}
-          </button>
-        </div>
-
-        {galError && (
-          <div style={ap.galError}>
-            <strong>Search failed:</strong> {galError}
-            {galError.includes('Graph API') && (
-              <div style={{ marginTop: 6, fontSize: 11 }}>
-                Ensure Azure AD app has <code style={s.code}>User.Read.All</code> Application permission with admin consent.
-              </div>
-            )}
-          </div>
-        )}
-
-        {galResults !== null && galResults.length === 0 && !galError && (
-          <div style={ap.galEmpty}>No matching users found for "{searchQuery}"</div>
-        )}
-
-        {galResults && galResults.length > 0 && (
-          <div style={ap.galResults}>
-            <div style={ap.galResultsLabel}>{galResults.length} result{galResults.length !== 1 ? 's' : ''}</div>
-            {galResults.map((user) => {
-              const justAdded = added.has(user.azure_oid);
-              return (
-                <div key={user.azure_oid} style={ap.galRow}>
-                  <div style={ap.galAvatar}>
-                    {(user.display_name || 'U').charAt(0).toUpperCase()}
-                  </div>
-                  <div style={ap.galInfo}>
-                    <div style={ap.galName}>{user.display_name}</div>
-                    <div style={ap.galMeta}>
-                      <span style={ap.galEmail}>{user.email}</span>
-                      {user.department && <span style={ap.galDept}>· {user.department}</span>}
-                      {user.job_title && <span style={ap.galDept}>· {user.job_title}</span>}
-                    </div>
-                  </div>
-                  <div style={ap.galAction}>
-                    {justAdded ? (
-                      <span style={ap.alreadyAdded}>✓ Added</span>
-                    ) : (
-                      <button className="btn" style={ap.addBtn}
-                        disabled={adding === user.azure_oid}
-                        onClick={() => addFromGal(user)}>
-                        {adding === user.azure_oid ? 'Adding…' : '+ Add'}
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* ── Manual add form ── */}
-      {showManual && (
+      {/* Add form */}
+      {showForm && (
         <div style={s.addForm} className="animate-rise">
-          <div style={s.addFormKicker}>§ Manual approver</div>
-          <div style={s.addFormTitle}>Add without Microsoft 365</div>
-          <div style={s.addFormSub}>For external approvers not in your Azure AD directory.</div>
+          <div style={s.addFormKicker}>§ New approver</div>
+          <div style={s.addFormTitle}>Add an approver</div>
+          <div style={s.addFormSub}>They will receive approval request emails and can approve or reject invoices.</div>
           <div style={{ ...s.formGrid, marginTop: 14 }}>
             <div style={s.formGroup}>
               <label style={s.label}>Full name *</label>
-              <input style={s.input} value={manualForm.display_name} placeholder="e.g. Jane Smith"
-                onChange={(e) => setManualForm({ ...manualForm, display_name: e.target.value })} />
+              <input style={s.input} value={form.display_name} placeholder="e.g. Jane Smith"
+                onChange={(e) => setForm({ ...form, display_name: e.target.value })} />
             </div>
             <div style={s.formGroup}>
               <label style={s.label}>Email address *</label>
-              <input style={s.input} type="email" value={manualForm.email} placeholder="jane@example.com"
-                onChange={(e) => setManualForm({ ...manualForm, email: e.target.value })} />
+              <input style={s.input} type="email" value={form.email} placeholder="jane@gardenerschools.com"
+                onChange={(e) => setForm({ ...form, email: e.target.value })} />
             </div>
             <div style={s.formGroup}>
               <label style={s.label}>Department</label>
-              <input style={s.input} value={manualForm.department} placeholder="e.g. Finance"
-                onChange={(e) => setManualForm({ ...manualForm, department: e.target.value })} />
+              <input style={s.input} value={form.department} placeholder="e.g. Finance"
+                onChange={(e) => setForm({ ...form, department: e.target.value })} />
             </div>
           </div>
           <div style={{ display: 'flex', gap: 10 }}>
-            <button className="btn" style={s.btnPrimary} disabled={manualSaving} onClick={addManual}>
-              {manualSaving ? 'Saving…' : 'Add approver →'}
+            <button className="btn" style={s.btnPrimary} disabled={saving} onClick={addApprover}>
+              {saving ? 'Saving…' : 'Add approver →'}
             </button>
             <button className="btn" style={s.btnSecondary}
-              onClick={() => { setShowManual(false); setManualForm({ display_name: '', email: '', department: '' }); }}>
+              onClick={() => { setShowForm(false); setForm({ display_name: '', email: '', department: '' }); }}>
               Cancel
             </button>
           </div>
         </div>
       )}
+
+      {/* Approvers list */}
+      <div style={s.card}>
+        {loading ? (
+          <div style={s.loading}>Loading approvers…</div>
+        ) : (
+          <table style={s.table}>
+            <thead>
+              <tr>
+                <th style={s.th}>Name</th>
+                <th style={s.th}>Email</th>
+                <th style={s.th}>Department</th>
+                <th style={s.th}>Status</th>
+                <th style={{ ...s.th, textAlign: 'right' }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {approvers.map((a, idx) => (
+                <tr key={a.id} style={{ ...s.row, ...(idx % 2 === 1 ? s.rowAlt : {}) }}>
+                  <td style={s.td}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <div style={ap.avatar}>{a.display_name.charAt(0).toUpperCase()}</div>
+                      <div style={s.name}>{a.display_name}</div>
+                    </div>
+                  </td>
+                  <td style={{ ...s.td, ...s.mono }}>{a.email}</td>
+                  <td style={{ ...s.td, color: 'var(--ink-muted)', fontSize: 12.5 }}>
+                    {a.department ?? <span style={s.faint}>—</span>}
+                  </td>
+                  <td style={s.td}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+                      <span style={{ ...s.statusDot, background: a.is_active ? 'var(--success)' : 'var(--ink-faint)' }} />
+                      <span style={{ fontSize: 12, color: a.is_active ? 'var(--ink)' : 'var(--ink-faint)' }}>
+                        {a.is_active ? 'Active' : 'Inactive'}
+                      </span>
+                    </span>
+                  </td>
+                  <td style={{ ...s.td, textAlign: 'right' }}>
+                    <button
+                      className="btn"
+                      style={a.is_active ? s.btnDanger : s.btnSecondary}
+                      disabled={toggling === a.id}
+                      onClick={() => toggleActive(a)}
+                    >
+                      {toggling === a.id ? '…' : a.is_active ? 'Deactivate' : 'Activate'}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {!loading && approvers.length === 0 && (
+          <div style={s.empty}>No approvers yet. Add one above to get started.</div>
+        )}
+      </div>
     </div>
   );
 }
 
 // Approvers-tab-specific styles
 const ap: Record<string, React.CSSProperties> = {
-  searchPanel: {
-    background: 'rgba(0,180,216,0.04)',
-    border: '1px solid rgba(0,180,216,0.18)',
-    borderRadius: 12,
-    padding: '22px 24px',
-    marginBottom: 18,
-  },
-  searchKicker: {
-    fontFamily: 'var(--font-mono)',
-    fontSize: 10,
-    color: 'var(--accent)',
-    fontWeight: 600,
-    letterSpacing: '0.15em',
-    textTransform: 'uppercase',
-    marginBottom: 4,
-  },
-  searchTitle: {
-    fontFamily: 'var(--font-display)',
-    fontSize: 20,
-    fontWeight: 500,
-    color: 'var(--ink)',
-    letterSpacing: '-0.015em',
-    marginBottom: 4,
-  },
-  searchSub: {
-    fontSize: 12.5,
-    color: 'var(--ink-muted)',
-    marginBottom: 16,
-    lineHeight: 1.5,
-  },
-  searchRow: {
-    display: 'flex',
-    gap: 10,
-    alignItems: 'center',
-  },
-  searchInput: {
-    flex: 1,
-    padding: '10px 14px',
-    borderRadius: 8,
-    border: '1px solid var(--line-strong)',
-    fontSize: 13,
-    background: 'var(--paper)',
-    color: 'var(--ink)',
-    outline: 'none',
-  },
-  galError: {
-    marginTop: 14,
-    padding: '12px 14px',
-    background: 'var(--danger-soft)',
-    border: '1px solid rgba(244,63,94,0.25)',
-    borderRadius: 8,
-    fontSize: 12.5,
-    color: 'var(--danger)',
-    lineHeight: 1.5,
-  },
-  galEmpty: {
-    marginTop: 14,
-    padding: '14px 16px',
-    background: 'var(--paper-tint)',
-    border: '1px dashed var(--line-strong)',
-    borderRadius: 8,
-    fontSize: 13,
-    color: 'var(--ink-muted)',
-    fontStyle: 'italic',
-    fontFamily: 'var(--font-display)',
-  },
-  galResults: {
-    marginTop: 14,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 2,
-  },
-  galResultsLabel: {
-    fontSize: 10.5,
-    fontWeight: 600,
-    color: 'var(--ink-faint)',
-    textTransform: 'uppercase',
-    letterSpacing: '0.16em',
-    marginBottom: 6,
-    fontFamily: 'var(--font-display)',
-  },
-  galRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 14,
-    padding: '12px 14px',
-    borderRadius: 8,
-    background: 'var(--paper)',
-    border: '1px solid var(--line)',
-    transition: 'background 0.12s var(--ease)',
-  },
-  galAvatar: {
-    width: 36,
-    height: 36,
+  avatar: {
+    width: 32,
+    height: 32,
     borderRadius: '50%',
-    background: 'linear-gradient(135deg, rgba(0,180,216,0.25) 0%, rgba(6,214,160,0.2) 100%)',
-    border: '1px solid rgba(0,198,224,0.3)',
+    background: 'linear-gradient(135deg, rgba(0,180,216,0.2) 0%, rgba(6,214,160,0.15) 100%)',
+    border: '1px solid rgba(0,198,224,0.25)',
     color: 'var(--accent)',
     display: 'grid',
     placeItems: 'center',
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: 700,
     fontFamily: 'var(--font-display)',
     flexShrink: 0,
-  },
-  galInfo: {
-    flex: 1,
-    minWidth: 0,
-  },
-  galName: {
-    fontSize: 13.5,
-    fontWeight: 500,
-    color: 'var(--ink)',
-    marginBottom: 2,
-  },
-  galMeta: {
-    display: 'flex',
-    gap: 6,
-    flexWrap: 'wrap',
-  },
-  galEmail: {
-    fontFamily: 'var(--font-mono)',
-    fontSize: 11.5,
-    color: 'var(--ink-muted)',
-  },
-  galDept: {
-    fontSize: 11.5,
-    color: 'var(--ink-faint)',
-  },
-  galAction: {
-    flexShrink: 0,
-  },
-  addBtn: {
-    padding: '6px 14px',
-    fontSize: 12,
-    borderRadius: 6,
-    background: 'rgba(0,180,216,0.12)',
-    color: 'var(--accent)',
-    border: '1px solid rgba(0,198,224,0.3)',
-    fontWeight: 600,
-    cursor: 'pointer',
-    transition: 'all 0.15s var(--ease)',
-  },
-  alreadyAdded: {
-    fontSize: 12,
-    color: 'var(--success)',
-    fontWeight: 600,
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 4,
-    padding: '6px 12px',
-    background: 'var(--success-soft)',
-    borderRadius: 6,
-    border: '1px solid rgba(16,185,129,0.2)',
   },
 };
 
