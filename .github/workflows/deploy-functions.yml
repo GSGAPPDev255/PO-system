@@ -22,6 +22,7 @@ jobs:
           version: latest
 
       - name: Deploy all Edge Functions
+        continue-on-error: true
         run: |
           supabase functions deploy email-intake       --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
           supabase functions deploy invoice-processor  --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}

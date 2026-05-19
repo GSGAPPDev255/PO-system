@@ -143,7 +143,8 @@ export default function InvoiceReview() {
       });
 
       if (fnError) throw new Error(fnError.message);
-      if (fnData?.error) throw new Error(String(fnData.error));
+      const fnResult = fnData as Record<string, unknown> | null;
+      if (fnResult?.error) throw new Error(String(fnResult.error));
 
       // Refresh PO + OCR data so the new values appear in the form
       qc.invalidateQueries({ queryKey: ['invoice', id] });
