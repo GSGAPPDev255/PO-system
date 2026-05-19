@@ -22,7 +22,7 @@ export default function InvoiceReview() {
   const { data: nominalLines = [] } = useNominalLines(id!);
   const { data: vatLines = [] } = useVatLines(id!);
   const { data: ocr } = useOcrExtraction(id!);
-  const { data: approvers = [] } = useApprovers((po as Record<string, unknown>)?.company as string | null);
+  const { data: approvers = [] } = useApprovers((po as unknown as Record<string, unknown>)?.company as string | null);
   const { data: auditLog = [] } = useAuditLog(id!);
 
   const updateInvoice = useUpdateInvoice();
