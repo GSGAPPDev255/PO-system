@@ -130,23 +130,48 @@ async function extractWithClaude(
 
   if (!res.ok) {
     const body = await res.text();
+    // If Claude rejects the file format, return all-null rather than failing the whole PO
+    if (res.status === 400) {
+      console.warn(`Claude rejected file (${mimeType}): ${body}`);
+      return {
+        fields: {
+          supplier_name: null, account_number: null, supplier_ref: null,
+          invoice_number: null, po_number: null, description: null,
+          invoice_date: null, due_date: null, net_amount: null,
+          vat_amount: null, gross_amount: null, currency: null,
+          vat_rate: null, payment_terms: null,
+        },
+        rawResponse: `Claude rejected: ${body}`,
+        processingMs: Date.now() - start,
+      };
+    }
     throw new Error(`Claude API error: ${res.status} ${body}`);
   }
 
   const data = await res.json() as { content?: Array<{ text?: string }> };
   const rawResponse = data?.content?.[0]?.text ?? '{}';
 
+  const emptyFields: ExtractedFields = {
+    supplier_name: null, account_number: null, supplier_ref: null,
+    invoice_number: null, po_number: null, description: null,
+    invoice_date: null, due_date: null, net_amount: null,
+    vat_amount: null, gross_amount: null, currency: null,
+    vat_rate: null, payment_terms: null,
+  };
+
   let fields: ExtractedFields;
   try {
-    fields = JSON.parse(rawResponse) as ExtractedFields;
+    // Extract just the JSON object — Claude sometimes adds markdown fences or
+    // trailing "Note:" text that breaks JSON.parse
+    const match = rawResponse.match(/\{[\s\S]*\}/);
+    if (!match) {
+      // Claude returned prose (e.g. "I don't see any image") — store all nulls
+      fields = emptyFields;
+    } else {
+      fields = JSON.parse(match[0]) as ExtractedFields;
+    }
   } catch {
-    fields = {
-      supplier_name: null, account_number: null, supplier_ref: null,
-      invoice_number: null, po_number: null, description: null,
-      invoice_date: null, due_date: null, net_amount: null,
-      vat_amount: null, gross_amount: null, currency: null,
-      vat_rate: null, payment_terms: null,
-    };
+    fields = emptyFields;
   }
 
   return { fields, rawResponse, processingMs };

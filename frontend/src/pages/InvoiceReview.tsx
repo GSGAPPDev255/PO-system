@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   useInvoice, useNominalLines, useVatLines, useOcrExtraction,
@@ -12,6 +13,7 @@ import AuditTimeline from '../components/shared/AuditTimeline';
 import StatusBadge from '../components/shared/StatusBadge';
 import ConfirmDialog from '../components/shared/ConfirmDialog';
 import { getInvoiceSignedUrl } from '../lib/auth';
+import { supabase } from '../lib/supabase';
 import type { PurchaseOrder, NominalLine, VatLine } from '../lib/supabase';
 
 export default function InvoiceReview() {
@@ -25,6 +27,7 @@ export default function InvoiceReview() {
   const { data: approvers = [] } = useApprovers((po as unknown as Record<string, unknown>)?.company as string | null);
   const { data: auditLog = [] } = useAuditLog(id!);
 
+  const qc = useQueryClient();
   const updateInvoice = useUpdateInvoice();
   const upsertNominal = useUpsertNominalLine();
   const upsertVat = useUpsertVatLine();
@@ -40,6 +43,8 @@ export default function InvoiceReview() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string[] | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [extracting, setExtracting] = useState(false);
+  const [extractError, setExtractError] = useState<string | null>(null);
 
   useEffect(() => {
     if (po) {
@@ -117,6 +122,37 @@ export default function InvoiceReview() {
         )}
       </div>
     );
+  };
+
+  const handleExtract = async () => {
+    setExtracting(true);
+    setExtractError(null);
+    try {
+      const fileData = (poData as Record<string, unknown>).invoice_file as {
+        storage_path?: string; mime_type?: string;
+      } | null;
+      if (!fileData?.storage_path) throw new Error('No file attached to this invoice');
+
+      const { error: fnError, data: fnData } = await supabase.functions.invoke('invoice-processor', {
+        body: {
+          purchase_order_id: id,
+          invoice_file_id: poData.invoice_file_id,
+          storage_path: fileData.storage_path,
+          mime_type: fileData.mime_type ?? 'application/pdf',
+        },
+      });
+
+      if (fnError) throw new Error(fnError.message);
+      if (fnData?.error) throw new Error(String(fnData.error));
+
+      // Refresh PO + OCR data so the new values appear in the form
+      qc.invalidateQueries({ queryKey: ['invoice', id] });
+      qc.invalidateQueries({ queryKey: ['ocr', id] });
+    } catch (e) {
+      setExtractError((e as Error).message);
+    } finally {
+      setExtracting(false);
+    }
   };
 
   const handleSave = async () => {
@@ -287,13 +323,23 @@ export default function InvoiceReview() {
         <div style={styles.pdfPanel} className="animate-rise delay-1">
           <div style={styles.pdfLabel}>§ Document</div>
           <div style={styles.pdfFrameWrap}>
-            {pdfUrl ? (
-              <iframe
-                src={pdfUrl}
-                style={styles.pdfFrame}
-                title="Invoice document"
-              />
-            ) : (
+            {pdfUrl ? (() => {
+              const mime = ((poData as Record<string, unknown>).invoice_file as { mime_type?: string } | null)?.mime_type ?? '';
+              const isImage = mime.startsWith('image/');
+              return isImage ? (
+                <img
+                  src={pdfUrl}
+                  alt="Invoice document"
+                  style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+                />
+              ) : (
+                <iframe
+                  src={pdfUrl}
+                  style={styles.pdfFrame}
+                  title="Invoice document"
+                />
+              );
+            })() : (
               <div style={styles.noPdf}>
                 <div style={styles.noPdfMark}>§</div>
                 <div style={styles.noPdfText}>No document available</div>
@@ -304,6 +350,43 @@ export default function InvoiceReview() {
 
         {/* Right: Form */}
         <div style={styles.formPanel} className="animate-rise delay-2">
+          {/* Extract Data button — only show if no OCR has been run yet */}
+          {!ocr && (
+            <div style={{ marginBottom: 16 }}>
+              <button
+                className="btn"
+                style={{
+                  background: 'var(--accent)',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 8,
+                  padding: '10px 20px',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: extracting ? 'not-allowed' : 'pointer',
+                  opacity: extracting ? 0.7 : 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                }}
+                onClick={handleExtract}
+                disabled={extracting}
+                title="Send the invoice to Claude AI to auto-fill fields"
+              >
+                {extracting ? (
+                  <>⏳ Extracting data…</>
+                ) : (
+                  <>✦ Extract Data with AI</>
+                )}
+              </button>
+              {extractError && (
+                <div style={{ marginTop: 8, fontSize: 12, color: 'var(--red, #e55)' }}>
+                  {extractError}
+                </div>
+              )}
+            </div>
+          )}
+
           <OcrComparisonPanel ocr={ocr ?? null} po={poData} />
 
           <Section title="Supplier" number="01">
