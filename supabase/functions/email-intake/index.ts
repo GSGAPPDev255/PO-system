@@ -1,15 +1,12 @@
 /**
- * email-intake: Polls all finance M365 mailboxes via MS Graph API.
- *
- * Mailboxes:
- *   purchases@kewhouseschool.com    -> kew_house
- *   purchases@gardenerschools.com   -> gardener_schools
- *   purchases@maidavaleschool.com   -> maida_vale
+ * email-intake: Polls all active finance mailboxes from the `mailboxes` DB table.
+ * Companies and mailboxes are managed via the Admin Panel — no hardcoding.
  *
  * For each unread email:
  *  1. Classify intent with Gemini
- *  2. Detect duplicate files
- *  3. Create PO for genuine new invoices
+ *  2. Prefer PDF/Word/Excel over images when selecting the invoice attachment
+ *  3. Detect duplicate files
+ *  4. Create ONE PO per email for genuine new invoices
  *
  * NOTE: invoice-processor is NOT auto-triggered.
  * Finance staff trigger it manually from the Invoice Review page.
@@ -28,14 +25,6 @@ const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
   auth: { persistSession: false },
 });
-
-const MAILBOXES = [
-  { email: 'purchases@kewhouseschool.com',   company: 'kew_house',        label: 'Kew House School' },
-  { email: 'purchases@gardenerschools.com',  company: 'gardener_schools', label: 'Gardener Schools' },
-  { email: 'purchases@maidavaleschool.com',  company: 'maida_vale',       label: 'Maida Vale School' },
-] as const;
-
-type CompanyEntity = 'kew_house' | 'gardener_schools' | 'maida_vale';
 
 let _cachedToken: { token: string; expiresAt: number } | null = null;
 
@@ -124,12 +113,22 @@ async function markMessageRead(mailbox: string, messageId: string): Promise<void
   }
 }
 
+// All supported MIME types for invoice attachments
 const SUPPORTED_MIME_TYPES: Record<string, boolean> = {
   'application/pdf': true, 'image/jpeg': true, 'image/png': true,
   'image/gif': true, 'image/webp': true,
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document': true,
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': true,
   'application/msword': true, 'application/vnd.ms-excel': true,
+};
+
+// Document types preferred over images — PDFs/Word/Excel are almost always the invoice
+const DOCUMENT_MIME_TYPES: Record<string, boolean> = {
+  'application/pdf': true,
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': true,
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': true,
+  'application/msword': true,
+  'application/vnd.ms-excel': true,
 };
 
 interface GraphMessage {
@@ -145,6 +144,13 @@ interface GraphAttachment {
   id: string; name: string; contentType: string; size: number; contentBytes: string;
 }
 
+interface MailboxRow {
+  id: string;
+  email: string;
+  label: string;
+  company: { slug: string; name: string };
+}
+
 interface ProcessResult {
   processed: number; skipped: number; duplicates: number; reminders: number; attachments_skipped: number;
   errors: string[];
@@ -152,18 +158,18 @@ interface ProcessResult {
 }
 
 async function processMailbox(
-  mailbox: string,
-  company: CompanyEntity,
+  mailboxEmail: string,
+  companySlug: string,
   results: ProcessResult,
 ): Promise<void> {
   let messages: GraphMessage[];
   try {
     const { value } = await graphGet<{ value: GraphMessage[] }>(
-      `/users/${encodeURIComponent(mailbox)}/mailFolders/inbox/messages?$filter=isRead eq false&$top=50&$select=id,subject,from,receivedDateTime,hasAttachments,body`,
+      `/users/${encodeURIComponent(mailboxEmail)}/mailFolders/inbox/messages?$filter=isRead eq false&$top=50&$select=id,subject,from,receivedDateTime,hasAttachments,body`,
     );
     messages = value;
   } catch (err) {
-    results.errors.push(`[${mailbox}] ${(err as Error).message}`);
+    results.errors.push(`[${mailboxEmail}] ${(err as Error).message}`);
     return;
   }
 
@@ -175,7 +181,7 @@ async function processMailbox(
 
       const classification = await classifyEmail(message.subject ?? '', bodyText);
       results.classifications.push({
-        mailbox, company,
+        mailbox: mailboxEmail, company: companySlug,
         subject: message.subject ?? '(no subject)',
         intent: classification.intent,
         summary: classification.summary,
@@ -185,7 +191,7 @@ async function processMailbox(
           classification.intent === 'remittance_advice' ||
           classification.intent === 'statement' ||
           !classification.requires_action) {
-        await markMessageRead(mailbox, message.id);
+        await markMessageRead(mailboxEmail, message.id);
         results.skipped++;
         continue;
       }
@@ -204,7 +210,7 @@ async function processMailbox(
           const { data: match } = await supabaseAdmin
             .from('purchase_orders').select('id')
             .ilike('supplier_name', `%${classification.supplier_name}%`)
-            .eq('company', company)
+            .eq('company', companySlug)
             .in('status', ['pending_finance_review', 'pending_approval'])
             .order('created_at', { ascending: false }).limit(1).maybeSingle();
           if (match) existingPoId = match.id;
@@ -214,39 +220,41 @@ async function processMailbox(
           action: 'reminder_sent',
           actor_email: message.from.emailAddress.address,
           actor_display: message.from.emailAddress.name || message.from.emailAddress.address,
-          metadata: { type: 'incoming_payment_reminder', email_subject: message.subject, company, urgency: classification.urgency, summary: classification.summary },
+          metadata: { type: 'incoming_payment_reminder', email_subject: message.subject, company: companySlug, urgency: classification.urgency, summary: classification.summary },
         });
-        await markMessageRead(mailbox, message.id);
+        await markMessageRead(mailboxEmail, message.id);
         results.reminders++;
         continue;
       }
 
       if (!message.hasAttachments) {
-        await markMessageRead(mailbox, message.id);
+        await markMessageRead(mailboxEmail, message.id);
         results.skipped++;
         continue;
       }
 
       const { value: attachments } = await graphGet<{ value: GraphAttachment[] }>(
-        `/users/${encodeURIComponent(mailbox)}/messages/${message.id}/attachments`,
+        `/users/${encodeURIComponent(mailboxEmail)}/messages/${message.id}/attachments`,
       );
 
       const invoiceAttachments = attachments?.filter((a: GraphAttachment) => SUPPORTED_MIME_TYPES[a.contentType]) || [];
       if (invoiceAttachments.length === 0) {
-        await markMessageRead(mailbox, message.id);
+        await markMessageRead(mailboxEmail, message.id);
         results.skipped++;
         continue;
       }
 
-      // Only process the FIRST supported attachment per email to avoid creating POs
-      // for logos, signatures, and other non-invoice images. If an email has multiple
-      // legitimate invoices, they should be sent separately.
-      const firstInvoiceAttachment = invoiceAttachments[0];
+      // Prefer PDF/Word/Excel over images — avoids picking up logos or signature
+      // images when the real invoice is a document. Falls back to first image only
+      // if no document-type attachment exists.
+      const bestAttachment =
+        invoiceAttachments.find((a) => DOCUMENT_MIME_TYPES[a.contentType]) ??
+        invoiceAttachments[0];
       if (invoiceAttachments.length > 1) {
         results.attachments_skipped += invoiceAttachments.length - 1;
       }
 
-      for (const attachment of [firstInvoiceAttachment]) {
+      for (const attachment of [bestAttachment]) {
         const { data: existingFile } = await supabaseAdmin
           .from('invoice_files').select('id')
           .eq('original_name', attachment.name)
@@ -290,7 +298,7 @@ async function processMailbox(
             id: poId,
             invoice_file_id: fileRecord.id,
             status: 'pending_finance_review',
-            company,
+            company: companySlug,
             supplier_name: classification.supplier_name ?? null,
           }).select().single();
 
@@ -302,8 +310,8 @@ async function processMailbox(
         await supabaseAdmin.from('audit_log').insert({
           purchase_order_id: poId, action: 'created',
           actor_email: 'system@email-intake', actor_display: 'Email Intake (System)',
-          new_values: { email_from: message.from.emailAddress.address, email_subject: message.subject, attachment: attachment.name, company },
-          metadata: { classification_intent: classification.intent, classification_summary: classification.summary, company },
+          new_values: { email_from: message.from.emailAddress.address, email_subject: message.subject, attachment: attachment.name, company: companySlug },
+          metadata: { classification_intent: classification.intent, classification_summary: classification.summary, company: companySlug },
         });
 
         // invoice-processor is NOT auto-triggered here.
@@ -312,9 +320,9 @@ async function processMailbox(
         results.processed++;
       }
 
-      await markMessageRead(mailbox, message.id);
+      await markMessageRead(mailboxEmail, message.id);
     } catch (err) {
-      results.errors.push(`[${mailbox}] ${(err as Error).message}`);
+      results.errors.push(`[${mailboxEmail}] ${(err as Error).message}`);
     }
   }
 }
@@ -326,11 +334,24 @@ Deno.serve(async (req) => {
     processed: 0, skipped: 0, duplicates: 0, reminders: 0, attachments_skipped: 0, errors: [], classifications: [],
   };
 
-  for (const { email, company } of MAILBOXES) {
-    await processMailbox(email, company, results);
+  // Load active mailboxes dynamically from the database
+  const { data: mailboxRows, error: mailboxErr } = await supabaseAdmin
+    .from('mailboxes')
+    .select('id, email, label, company:companies(slug, name)')
+    .eq('is_active', true);
+
+  if (mailboxErr || !mailboxRows || mailboxRows.length === 0) {
+    return new Response(
+      JSON.stringify({ error: 'No active mailboxes found', detail: mailboxErr?.message }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+    );
   }
 
-  return new Response(JSON.stringify(results), {
+  for (const row of mailboxRows as unknown as MailboxRow[]) {
+    await processMailbox(row.email, row.company.slug, results);
+  }
+
+  return new Response(JSON.stringify({ ...results, mailboxes_polled: mailboxRows.length }), {
     status: 200,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
