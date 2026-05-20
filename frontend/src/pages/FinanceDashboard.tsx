@@ -1,8 +1,9 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { format, parseISO, isValid } from 'date-fns';
 import { useInvoices } from '../hooks/useInvoices';
 import StatusBadge from '../components/shared/StatusBadge';
+import { supabase } from '../lib/supabase';
 import type { InvoiceStatus } from '../lib/supabase';
 
 const STATUS_FILTERS: { label: string; value: InvoiceStatus | 'all' }[] = [
@@ -13,13 +14,6 @@ const STATUS_FILTERS: { label: string; value: InvoiceStatus | 'all' }[] = [
   { label: 'Rejected',         value: 'rejected' },
   { label: 'Ready to Export',  value: 'approved_ready_export' },
   { label: 'Exported',         value: 'exported' },
-];
-
-const COMPANY_FILTERS: { label: string; value: string }[] = [
-  { label: 'All Schools',       value: 'all' },
-  { label: 'Kew House',         value: 'kew_house' },
-  { label: 'Gardener Schools',  value: 'gardener_schools' },
-  { label: 'Maida Vale',        value: 'maida_vale' },
 ];
 
 function fmtDate(raw: string): string {
@@ -41,7 +35,27 @@ export default function FinanceDashboard() {
   const [statusFilter, setStatusFilter] = useState<InvoiceStatus | 'all'>('all');
   const [companyFilter, setCompanyFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
+  const [companyFilters, setCompanyFilters] = useState<{ label: string; value: string }[]>([
+    { label: 'All', value: 'all' },
+  ]);
   const navigate = useNavigate();
+
+  // Load companies dynamically from DB
+  useEffect(() => {
+    supabase
+      .from('companies')
+      .select('name, slug')
+      .eq('is_active', true)
+      .order('name')
+      .then(({ data }) => {
+        if (data && data.length > 0) {
+          setCompanyFilters([
+            { label: 'All', value: 'all' },
+            ...data.map((c: { name: string; slug: string }) => ({ label: c.name, value: c.slug })),
+          ]);
+        }
+      });
+  }, []);
 
   const { data: invoices = [], isLoading, error } = useInvoices(
     statusFilter === 'all' ? undefined : statusFilter,
@@ -133,7 +147,7 @@ export default function FinanceDashboard() {
 
         {/* Company filter */}
         <div style={{ ...styles.tabs, marginBottom: 8 }} role="tablist" className="filter-chips">
-          {COMPANY_FILTERS.map((f) => (
+          {companyFilters.map((f) => (
             <button
               key={f.value}
               role="tab"
@@ -274,21 +288,23 @@ export default function FinanceDashboard() {
   );
 }
 
-const COMPANY_LABELS: Record<string, { label: string; color: string }> = {
-  kew_house:        { label: 'Kew House',        color: '#7b61ff' },
-  gardener_schools: { label: 'Gardener Schools',  color: '#00b4d8' },
-  maida_vale:       { label: 'Maida Vale',        color: '#06d6a0' },
-};
+// Cycle through accent colours for any company slug
+const BADGE_COLORS = ['#7b61ff', '#00b4d8', '#06d6a0', '#f4a261', '#e76f51', '#a8dadc'];
+function companyColor(slug: string): string {
+  let hash = 0;
+  for (let i = 0; i < slug.length; i++) hash = (hash * 31 + slug.charCodeAt(i)) & 0xffffffff;
+  return BADGE_COLORS[Math.abs(hash) % BADGE_COLORS.length];
+}
 
-function CompanyBadge({ company }: { company: string | null }) {
+function CompanyBadge({ company, label }: { company: string | null; label?: string }) {
   if (!company) return <span style={{ color: 'var(--ink-muted)', fontSize: 12 }}>—</span>;
-  const meta = COMPANY_LABELS[company];
-  if (!meta) return <span style={{ color: 'var(--ink-muted)', fontSize: 12 }}>{company}</span>;
+  const color = companyColor(company);
+  const displayLabel = label ?? company.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
   return (
     <span style={{
       display: 'inline-block', fontSize: 11, fontWeight: 600, letterSpacing: '0.04em',
       padding: '2px 8px', borderRadius: 20,
-      background: `${meta.color}22`, color: meta.color, border: `1px solid ${meta.color}44`,
+      background: `${color}22`, color, border: `1px solid ${color}44`,
       whiteSpace: 'nowrap',
     }}>
       {meta.label}
