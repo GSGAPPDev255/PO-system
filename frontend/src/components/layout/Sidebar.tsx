@@ -24,32 +24,12 @@ const NAV_ITEMS: NavItem[] = [
     section: 'invoices',
     icon: <ExportIcon />,
   },
-  // ── Expense section ──────────────────────────────────────────────────────
-  {
-    number: '03', label: 'Expenses',    path: '/expenses',
-    roles: ['finance', 'admin', 'auditor'],
-    section: 'expenses',
-    icon: <ReceiptIcon />,
-  },
-  {
-    number: '04', label: 'Exp. Export', path: '/expenses/export',
-    roles: ['finance', 'admin'],
-    section: 'expenses',
-    icon: <ExportIcon />,
-  },
   // ── System ───────────────────────────────────────────────────────────────
   {
-    number: '05', label: 'Admin',       path: '/admin',
+    number: '03', label: 'Admin',       path: '/admin',
     roles: ['admin'],
     section: 'system',
     icon: <AdminIcon />,
-  },
-  // ── Staff-only ───────────────────────────────────────────────────────────
-  {
-    number: '01', label: 'My Expenses', path: '/my-expenses',
-    roles: ['staff'],
-    section: 'expenses',
-    icon: <ReceiptIcon />,
   },
 ];
 
@@ -163,9 +143,7 @@ export default function Sidebar({ role, isOpen, onClose }: SidebarProps) {
         <SotaraInfinityMark size={42} />
         <div>
           <div style={styles.brandWordmark}>SOTARA</div>
-          <div style={styles.brandSub}>
-            {isStaff ? 'Expense Portal' : 'Finance Platform'}
-          </div>
+          <div style={styles.brandSub}>Finance Platform</div>
         </div>
       </div>
 
@@ -246,9 +224,7 @@ export default function Sidebar({ role, isOpen, onClose }: SidebarProps) {
             <SotaraInfinityMark size={22} />
           </div>
           <div style={styles.footerRight}>
-            <div style={styles.footerPlatform}>
-              {isStaff ? 'Staff Portal' : 'Invoices & Expenses'}
-            </div>
+            <div style={styles.footerPlatform}>Invoices</div>
             <div style={styles.footerCopyright}>Sotara · Finance</div>
           </div>
         </div>

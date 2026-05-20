@@ -110,9 +110,16 @@ async function extractWithClaude(
   const payload = {
     model: CLAUDE_MODEL,
     max_tokens: 1024,
+    system: [
+      {
+        type: 'text',
+        text: EXTRACTION_PROMPT,
+        cache_control: { type: 'ephemeral' },
+      },
+    ],
     messages: [{
       role: 'user',
-      content: [fileContent, { type: 'text', text: EXTRACTION_PROMPT }],
+      content: [fileContent],
     }],
   };
 
@@ -121,7 +128,7 @@ async function extractWithClaude(
     headers: {
       'Content-Type': 'application/json',
       'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
+      'anthropic-version': '2024-06-01',
     },
     body: JSON.stringify(payload),
   });

@@ -146,7 +146,7 @@ interface GraphAttachment {
 }
 
 interface ProcessResult {
-  processed: number; skipped: number; duplicates: number; reminders: number;
+  processed: number; skipped: number; duplicates: number; reminders: number; attachments_skipped: number;
   errors: string[];
   classifications: Array<{ mailbox: string; company: string; subject: string; intent: string; summary: string }>;
 }
@@ -238,7 +238,15 @@ async function processMailbox(
         continue;
       }
 
-      for (const attachment of invoiceAttachments) {
+      // Only process the FIRST supported attachment per email to avoid creating POs
+      // for logos, signatures, and other non-invoice images. If an email has multiple
+      // legitimate invoices, they should be sent separately.
+      const firstInvoiceAttachment = invoiceAttachments[0];
+      if (invoiceAttachments.length > 1) {
+        results.attachments_skipped += invoiceAttachments.length - 1;
+      }
+
+      for (const attachment of [firstInvoiceAttachment]) {
         const { data: existingFile } = await supabaseAdmin
           .from('invoice_files').select('id')
           .eq('original_name', attachment.name)
@@ -315,7 +323,7 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   const results: ProcessResult = {
-    processed: 0, skipped: 0, duplicates: 0, reminders: 0, errors: [], classifications: [],
+    processed: 0, skipped: 0, duplicates: 0, reminders: 0, attachments_skipped: 0, errors: [], classifications: [],
   };
 
   for (const { email, company } of MAILBOXES) {

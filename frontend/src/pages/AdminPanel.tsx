@@ -10,7 +10,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import type { Profile, UserRole } from '../lib/supabase';
 
-type Tab = 'users' | 'approvers' | 'alerts' | 'system';
+type Tab = 'users' | 'approvers' | 'companies' | 'alerts' | 'system';
 
 interface SystemSetting { key: string; value: string; description: string }
 
@@ -35,8 +35,9 @@ const ROLE_TINTS: Record<UserRole, { bg: string; color: string; border: string }
 const TAB_META: { id: Tab; number: string; label: string }[] = [
   { id: 'users',     number: '01', label: 'Users' },
   { id: 'approvers', number: '02', label: 'Approvers' },
-  { id: 'alerts',    number: '03', label: 'Alerts' },
-  { id: 'system',    number: '04', label: 'System' },
+  { id: 'companies', number: '03', label: 'Companies' },
+  { id: 'alerts',    number: '04', label: 'Alerts' },
+  { id: 'system',    number: '05', label: 'System' },
 ];
 
 export default function AdminPanel() {
@@ -53,7 +54,7 @@ export default function AdminPanel() {
           The <em style={s.pageTitleEm}>control panel</em>.
         </h1>
         <p style={s.subtitle}>
-          Users, approvers, alerts, and system health — all in one place.
+          Users, approvers, companies, mailboxes, and system health — all in one place.
         </p>
       </div>
 
@@ -78,6 +79,7 @@ export default function AdminPanel() {
       <div style={s.content}>
         {tab === 'users'     && <UsersTab />}
         {tab === 'approvers' && <ApproversTab />}
+        {tab === 'companies' && <CompaniesTab />}
         {tab === 'alerts'    && <AlertsTab />}
         {tab === 'system'    && <SystemTab />}
       </div>
@@ -310,28 +312,18 @@ interface Approver {
   synced_at: string;
 }
 
-const COMPANY_OPTIONS = [
-  { value: '',                 label: 'Group-wide (all schools)' },
-  { value: 'kew_house',        label: 'Kew House School' },
-  { value: 'gardener_schools', label: 'Gardener Schools' },
-  { value: 'maida_vale',       label: 'Maida Vale School' },
-];
-
-const COMPANY_LABELS: Record<string, string> = {
-  kew_house:        'Kew House',
-  gardener_schools: 'Gardener Schools',
-  maida_vale:       'Maida Vale',
-};
+interface CompanyOption { value: string; label: string }
 
 function ApproversTab() {
-  const [approvers, setApprovers]       = useState<Approver[]>([]);
-  const [loading, setLoading]           = useState(true);
-  const [showForm, setShowForm]         = useState(false);
-  const [form, setForm]                 = useState({ display_name: '', email: '', department: '', company: '' });
-  const [saving, setSaving]             = useState(false);
-  const [toggling, setToggling]         = useState<string | null>(null);
-  const [msg, setMsg]                   = useState('');
-  const [msgType, setMsgType]           = useState<'success' | 'error'>('success');
+  const [approvers, setApprovers]         = useState<Approver[]>([]);
+  const [companyOptions, setCompanyOptions] = useState<CompanyOption[]>([{ value: '', label: 'Group-wide (all companies)' }]);
+  const [loading, setLoading]             = useState(true);
+  const [showForm, setShowForm]           = useState(false);
+  const [form, setForm]                   = useState({ display_name: '', email: '', department: '', company: '' });
+  const [saving, setSaving]               = useState(false);
+  const [toggling, setToggling]           = useState<string | null>(null);
+  const [msg, setMsg]                     = useState('');
+  const [msgType, setMsgType]             = useState<'success' | 'error'>('success');
 
   function flash(m: string, type: 'success' | 'error' = 'success') {
     setMsg(m); setMsgType(type);
@@ -340,12 +332,17 @@ function ApproversTab() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('approvers')
-      .select('*')
-      .order('display_name');
-    if (error) flash('Could not load approvers: ' + error.message, 'error');
-    setApprovers((data as Approver[]) ?? []);
+    const [approversRes, companiesRes] = await Promise.all([
+      supabase.from('approvers').select('*').order('display_name'),
+      supabase.from('companies').select('slug, name').eq('is_active', true).order('name'),
+    ]);
+    if (approversRes.error) flash('Could not load approvers: ' + approversRes.error.message, 'error');
+    setApprovers((approversRes.data as Approver[]) ?? []);
+    const opts: CompanyOption[] = [{ value: '', label: 'Group-wide (all companies)' }];
+    for (const c of (companiesRes.data ?? []) as { slug: string; name: string }[]) {
+      opts.push({ value: c.slug, label: c.name });
+    }
+    setCompanyOptions(opts);
     setLoading(false);
   }, []);
 
@@ -423,16 +420,16 @@ function ApproversTab() {
                 onChange={(e) => setForm({ ...form, department: e.target.value })} />
             </div>
             <div style={s.formGroup}>
-              <label style={s.label}>School *</label>
+              <label style={s.label}>Company *</label>
               <select style={s.input} value={form.company}
                 onChange={(e) => setForm({ ...form, company: e.target.value })}>
-                {COMPANY_OPTIONS.map((o) => (
+                {companyOptions.map((o) => (
                   <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
               </select>
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 10 }}>
+          <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
             <button className="btn" style={s.btnPrimary} disabled={saving} onClick={addApprover}>
               {saving ? 'Saving…' : 'Add approver →'}
             </button>
@@ -473,7 +470,7 @@ function ApproversTab() {
                   <td style={s.td}>
                     {a.company
                       ? <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 20, background: 'var(--accent-soft)', color: 'var(--accent-text)', border: '1px solid var(--border)' }}>
-                          {COMPANY_LABELS[a.company] ?? a.company}
+                          {companyOptions.find((o) => o.value === a.company)?.label ?? a.company}
                         </span>
                       : <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 20, background: 'rgba(139,92,246,0.1)', color: '#A78BFA', border: '1px solid rgba(139,92,246,0.25)' }}>
                           Group-wide
@@ -529,6 +526,373 @@ const ap: Record<string, React.CSSProperties> = {
     fontWeight: 700,
     fontFamily: 'var(--font-display)',
     flexShrink: 0,
+  },
+};
+
+// ─── Companies Tab ────────────────────────────────────────────────────────────
+
+interface Company {
+  id: string;
+  name: string;
+  slug: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+interface Mailbox {
+  id: string;
+  company_id: string;
+  email: string;
+  label: string;
+  is_active: boolean;
+}
+
+function CompaniesTab() {
+  const [companies, setCompanies]       = useState<Company[]>([]);
+  const [mailboxes, setMailboxes]       = useState<Mailbox[]>([]);
+  const [loading, setLoading]           = useState(true);
+  const [expandedId, setExpandedId]     = useState<string | null>(null);
+  const [showAddCompany, setShowAddCompany] = useState(false);
+  const [addingMailboxFor, setAddingMailboxFor] = useState<string | null>(null);
+  const [companyForm, setCompanyForm]   = useState({ name: '', slug: '' });
+  const [mailboxForm, setMailboxForm]   = useState({ email: '', label: '' });
+  const [saving, setSaving]             = useState(false);
+  const [toggling, setToggling]         = useState<string | null>(null);
+  const [msg, setMsg]                   = useState('');
+  const [msgType, setMsgType]           = useState<'success' | 'error'>('success');
+
+  function flash(m: string, type: 'success' | 'error' = 'success') {
+    setMsg(m); setMsgType(type);
+    setTimeout(() => setMsg(''), 4000);
+  }
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const [cRes, mRes] = await Promise.all([
+      supabase.from('companies').select('*').order('name'),
+      supabase.from('mailboxes').select('*').order('label'),
+    ]);
+    if (cRes.error) flash('Could not load companies: ' + cRes.error.message, 'error');
+    if (mRes.error) flash('Could not load mailboxes: ' + mRes.error.message, 'error');
+    setCompanies((cRes.data as Company[]) ?? []);
+    setMailboxes((mRes.data as Mailbox[]) ?? []);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  // Derive slug from name automatically
+  function nameToSlug(name: string) {
+    return name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+  }
+
+  async function addCompany() {
+    const { name, slug } = companyForm;
+    if (!name.trim() || !slug.trim()) { flash('Name and slug are required.', 'error'); return; }
+    setSaving(true);
+    const { error } = await supabase.from('companies').insert({
+      name: name.trim(),
+      slug: slug.trim(),
+    });
+    if (error) flash('Error: ' + error.message, 'error');
+    else {
+      flash(`${name.trim()} added.`);
+      setCompanyForm({ name: '', slug: '' });
+      setShowAddCompany(false);
+      await load();
+    }
+    setSaving(false);
+  }
+
+  async function toggleCompany(c: Company) {
+    setToggling(c.id);
+    const { error } = await supabase.from('companies').update({ is_active: !c.is_active }).eq('id', c.id);
+    if (error) flash('Error: ' + error.message, 'error');
+    else { flash(`${c.name} ${c.is_active ? 'deactivated' : 'activated'}.`); await load(); }
+    setToggling(null);
+  }
+
+  async function addMailbox(companyId: string) {
+    const { email, label } = mailboxForm;
+    if (!email.trim() || !label.trim()) { flash('Email and label are required.', 'error'); return; }
+    setSaving(true);
+    const { error } = await supabase.from('mailboxes').insert({
+      company_id: companyId,
+      email: email.trim().toLowerCase(),
+      label: label.trim(),
+    });
+    if (error) flash('Error: ' + error.message, 'error');
+    else {
+      flash(`${email.trim().toLowerCase()} added.`);
+      setMailboxForm({ email: '', label: '' });
+      setAddingMailboxFor(null);
+      await load();
+    }
+    setSaving(false);
+  }
+
+  async function toggleMailbox(m: Mailbox) {
+    setToggling(m.id);
+    const { error } = await supabase.from('mailboxes').update({ is_active: !m.is_active }).eq('id', m.id);
+    if (error) flash('Error: ' + error.message, 'error');
+    else { flash(`${m.email} ${m.is_active ? 'disabled' : 'enabled'}.`); await load(); }
+    setToggling(null);
+  }
+
+  async function deleteMailbox(m: Mailbox) {
+    if (!confirm(`Remove ${m.email}? This won't affect existing invoices.`)) return;
+    setToggling(m.id);
+    const { error } = await supabase.from('mailboxes').delete().eq('id', m.id);
+    if (error) flash('Error: ' + error.message, 'error');
+    else { flash(`${m.email} removed.`); await load(); }
+    setToggling(null);
+  }
+
+  if (loading) return <div style={s.loading}>Loading companies…</div>;
+
+  return (
+    <div>
+      <SectionHeader
+        title="Companies & mailboxes"
+        subtitle="Each company has its own set of email inboxes. New invoices are tagged to the company they arrived in."
+        msg={msg}
+        msgType={msgType}
+        actions={
+          <button className="btn" style={s.btnPrimary} onClick={() => setShowAddCompany((v) => !v)}>
+            {showAddCompany ? 'Cancel' : '+ Add company'}
+          </button>
+        }
+      />
+
+      {showAddCompany && (
+        <div style={s.addForm} className="animate-rise">
+          <div style={s.addFormKicker}>§ New company</div>
+          <div style={s.addFormTitle}>Add a company</div>
+          <div style={s.addFormSub}>The slug is used internally to tag invoices — use lowercase_underscores.</div>
+          <div style={{ ...s.formGrid, gridTemplateColumns: '1fr 1fr', marginTop: 14 }}>
+            <div style={s.formGroup}>
+              <label style={s.label}>Company name *</label>
+              <input
+                style={s.input}
+                value={companyForm.name}
+                placeholder="e.g. Kew House School"
+                onChange={(e) => {
+                  const name = e.target.value;
+                  setCompanyForm({ name, slug: nameToSlug(name) });
+                }}
+              />
+            </div>
+            <div style={s.formGroup}>
+              <label style={s.label}>Slug * (auto-generated)</label>
+              <input
+                style={{ ...s.input, fontFamily: 'var(--font-mono)', fontSize: 12 }}
+                value={companyForm.slug}
+                placeholder="kew_house_school"
+                onChange={(e) => setCompanyForm({ ...companyForm, slug: e.target.value })}
+              />
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button className="btn" style={s.btnPrimary} disabled={saving} onClick={addCompany}>
+              {saving ? 'Saving…' : 'Add company →'}
+            </button>
+            <button className="btn" style={s.btnSecondary} onClick={() => { setShowAddCompany(false); setCompanyForm({ name: '', slug: '' }); }}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {companies.map((c) => {
+          const cMailboxes = mailboxes.filter((m) => m.company_id === c.id);
+          const expanded = expandedId === c.id;
+          return (
+            <div key={c.id} style={{ ...s.card, marginBottom: 0, opacity: c.is_active ? 1 : 0.6 }}>
+              {/* Company header row */}
+              <div
+                style={co.companyRow}
+                onClick={() => setExpandedId(expanded ? null : c.id)}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 0 }}>
+                  <span style={{ ...co.chevron, transform: expanded ? 'rotate(90deg)' : 'none' }}>›</span>
+                  <div>
+                    <div style={{ fontWeight: 500, color: 'var(--ink)', fontSize: 14 }}>{c.name}</div>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--ink-faint)', marginTop: 1 }}>{c.slug}</div>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <span style={{ fontSize: 11.5, color: 'var(--ink-muted)' }}>
+                    {cMailboxes.length} mailbox{cMailboxes.length !== 1 ? 'es' : ''}
+                  </span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ ...s.statusDot, background: c.is_active ? 'var(--success)' : 'var(--ink-faint)' }} />
+                    <span style={{ fontSize: 11.5, color: c.is_active ? 'var(--ink-soft)' : 'var(--ink-faint)' }}>
+                      {c.is_active ? 'Active' : 'Inactive'}
+                    </span>
+                  </span>
+                  <button
+                    className="btn"
+                    style={c.is_active ? s.btnDanger : s.btnSecondary}
+                    disabled={toggling === c.id}
+                    onClick={(e) => { e.stopPropagation(); toggleCompany(c); }}
+                  >
+                    {toggling === c.id ? '…' : c.is_active ? 'Deactivate' : 'Activate'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Expanded mailboxes */}
+              {expanded && (
+                <div style={co.mailboxSection}>
+                  <div style={co.mailboxHeader}>
+                    <span style={co.mailboxHeaderLabel}>Mailboxes</span>
+                    <button
+                      className="btn"
+                      style={s.btnSecondary}
+                      onClick={() => { setAddingMailboxFor(addingMailboxFor === c.id ? null : c.id); setMailboxForm({ email: '', label: '' }); }}
+                    >
+                      {addingMailboxFor === c.id ? 'Cancel' : '+ Add mailbox'}
+                    </button>
+                  </div>
+
+                  {addingMailboxFor === c.id && (
+                    <div style={co.addMailboxForm}>
+                      <div style={{ ...s.formGrid, gridTemplateColumns: '1fr 1fr', marginBottom: 12 }}>
+                        <div style={s.formGroup}>
+                          <label style={s.label}>Email address *</label>
+                          <input
+                            style={s.input}
+                            type="email"
+                            value={mailboxForm.email}
+                            placeholder="purchases@school.com"
+                            onChange={(e) => setMailboxForm({ ...mailboxForm, email: e.target.value })}
+                          />
+                        </div>
+                        <div style={s.formGroup}>
+                          <label style={s.label}>Label *</label>
+                          <input
+                            style={s.input}
+                            value={mailboxForm.label}
+                            placeholder="e.g. School Purchases"
+                            onChange={(e) => setMailboxForm({ ...mailboxForm, label: e.target.value })}
+                          />
+                        </div>
+                      </div>
+                      <button className="btn" style={s.btnPrimary} disabled={saving} onClick={() => addMailbox(c.id)}>
+                        {saving ? 'Adding…' : 'Add mailbox →'}
+                      </button>
+                    </div>
+                  )}
+
+                  {cMailboxes.length === 0 ? (
+                    <div style={{ padding: '16px 20px', fontSize: 12.5, color: 'var(--ink-faint)', fontStyle: 'italic', fontFamily: 'var(--font-display)' }}>
+                      No mailboxes yet — add one to start receiving invoices.
+                    </div>
+                  ) : (
+                    <table style={{ ...s.table, borderTop: '1px solid var(--line)' }}>
+                      <thead>
+                        <tr>
+                          <th style={co.mth}>Email</th>
+                          <th style={co.mth}>Label</th>
+                          <th style={co.mth}>Status</th>
+                          <th style={{ ...co.mth, textAlign: 'right' }}>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {cMailboxes.map((m, idx) => (
+                          <tr key={m.id} style={{ ...s.row, ...(idx % 2 === 1 ? s.rowAlt : {}), opacity: m.is_active ? 1 : 0.5 }}>
+                            <td style={{ ...s.td, ...s.mono, fontSize: 12.5 }}>{m.email}</td>
+                            <td style={{ ...s.td, fontSize: 13 }}>{m.label}</td>
+                            <td style={s.td}>
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                <span style={{ ...s.statusDot, background: m.is_active ? 'var(--success)' : 'var(--ink-faint)' }} />
+                                <span style={{ fontSize: 11.5 }}>{m.is_active ? 'Active' : 'Paused'}</span>
+                              </span>
+                            </td>
+                            <td style={{ ...s.td, textAlign: 'right' }}>
+                              <div style={{ display: 'inline-flex', gap: 6 }}>
+                                <button className="btn" style={s.btnSecondary} disabled={toggling === m.id}
+                                  onClick={() => toggleMailbox(m)}>
+                                  {toggling === m.id ? '…' : m.is_active ? 'Pause' : 'Resume'}
+                                </button>
+                                <button className="btn" style={s.btnDanger} disabled={toggling === m.id}
+                                  onClick={() => deleteMailbox(m)}>
+                                  Remove
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {companies.length === 0 && (
+          <div style={{ ...s.card, padding: 36, textAlign: 'center', color: 'var(--ink-muted)', fontSize: 13, fontFamily: 'var(--font-display)', fontStyle: 'italic' }}>
+            No companies yet. Add one above to get started.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// CompaniesTab-specific styles
+const co: Record<string, React.CSSProperties> = {
+  companyRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 14,
+    padding: '14px 18px',
+    cursor: 'pointer',
+    borderRadius: 10,
+    transition: 'background 0.12s var(--ease)',
+  },
+  chevron: {
+    fontSize: 18,
+    color: 'var(--ink-faint)',
+    fontFamily: 'var(--font-display)',
+    transition: 'transform 0.15s var(--ease)',
+    flexShrink: 0,
+    lineHeight: 1,
+  },
+  mailboxSection: {
+    borderTop: '1px solid var(--line)',
+  },
+  mailboxHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '10px 18px',
+    background: 'var(--paper)',
+  },
+  mailboxHeaderLabel: {
+    fontSize: 10.5,
+    fontWeight: 600,
+    color: 'var(--ink-faint)',
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.18em',
+  },
+  addMailboxForm: {
+    padding: '14px 18px',
+    background: 'var(--paper)',
+    borderBottom: '1px solid var(--line)',
+  },
+  mth: {
+    padding: '8px 16px',
+    textAlign: 'left' as const,
+    fontSize: 10,
+    fontWeight: 600,
+    color: 'var(--ink-faint)',
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.14em',
+    borderBottom: '1px solid var(--line)',
+    background: 'var(--paper)',
   },
 };
 
