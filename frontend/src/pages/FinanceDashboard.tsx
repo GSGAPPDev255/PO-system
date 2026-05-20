@@ -307,7 +307,7 @@ function CompanyBadge({ company, label }: { company: string | null; label?: stri
       background: `${color}22`, color, border: `1px solid ${color}44`,
       whiteSpace: 'nowrap',
     }}>
-      {meta.label}
+      {displayLabel}
     </span>
   );
 }
