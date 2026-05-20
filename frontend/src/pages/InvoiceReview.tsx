@@ -128,7 +128,7 @@ export default function InvoiceReview() {
     setExtracting(true);
     setExtractError(null);
     try {
-      const fileData = (poData as Record<string, unknown>).invoice_file as {
+      const fileData = (poData as unknown as Record<string, unknown>).invoice_file as {
         storage_path?: string; mime_type?: string;
       } | null;
       if (!fileData?.storage_path) throw new Error('No file attached to this invoice');
@@ -325,7 +325,7 @@ export default function InvoiceReview() {
           <div style={styles.pdfLabel}>§ Document</div>
           <div style={styles.pdfFrameWrap}>
             {pdfUrl ? (() => {
-              const mime = ((poData as Record<string, unknown>).invoice_file as { mime_type?: string } | null)?.mime_type ?? '';
+              const mime = ((poData as unknown as Record<string, unknown>).invoice_file as { mime_type?: string } | null)?.mime_type ?? '';
               const isImage = mime.startsWith('image/');
               return isImage ? (
                 <img
