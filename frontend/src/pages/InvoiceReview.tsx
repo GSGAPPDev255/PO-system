@@ -189,14 +189,14 @@ export default function InvoiceReview() {
     const errors: string[] = [];
 
     // Required fields
-    if (!form.account_number?.trim()) {
-      errors.push('Account Number is required');
-    }
     if (!form.supplier_name?.trim()) {
       errors.push('Supplier Name is required');
     }
     if (!form.transaction_date) {
       errors.push('Transaction Date is required');
+    }
+    if (!form.assigned_approver_id) {
+      errors.push('A Primary Approver must be assigned');
     }
 
     // Amount validation: Net + VAT = Gross (±0.01)
@@ -205,7 +205,7 @@ export default function InvoiceReview() {
     const gross = Number(form.gross_amount ?? 0);
     const TOLERANCE = 0.01;
 
-    if (Math.abs(net + vat - gross) > TOLERANCE) {
+    if (gross > 0 && Math.abs(net + vat - gross) > TOLERANCE) {
       errors.push(`Net (£${net.toFixed(2)}) + VAT (£${vat.toFixed(2)}) must equal Gross (£${gross.toFixed(2)})`);
     }
 
@@ -216,11 +216,14 @@ export default function InvoiceReview() {
     const validationErrors = validateReadyForApproval();
     if (validationErrors.length > 0) {
       setSaveError(validationErrors);
+      setShowConfirm(false);
       return;
     }
 
     setShowConfirm(false);
     try {
+      // Auto-save any unsaved form changes before sending for approval
+      await handleSave();
       await markReady.mutateAsync(id!);
     } catch (e) {
       setSaveError([(e as Error).message]);
@@ -264,22 +267,22 @@ export default function InvoiceReview() {
                     className="btn"
                     style={{
                       ...styles.approvalBtn,
-                      ...(poData.assigned_approver_id ? {} : styles.approvalBtnDisabled),
+                      ...(form.assigned_approver_id ? {} : styles.approvalBtnDisabled),
                     }}
                     onClick={() => setShowConfirm(true)}
-                    disabled={!poData.assigned_approver_id}
+                    disabled={!form.assigned_approver_id}
                     title={
-                      poData.assigned_approver_id
+                      form.assigned_approver_id
                         ? 'Send approval email to the assigned approver'
-                        : 'Assign a Primary Approver below, then Save Draft to enable this button'
+                        : 'Assign a Primary Approver below to enable this button'
                     }
                   >
                     Send for Approval
                     <span style={styles.approvalArrow}>→</span>
                   </button>
-                  {!poData.assigned_approver_id && (
+                  {!form.assigned_approver_id && (
                     <span style={styles.approvalHint}>
-                      Assign a primary approver &amp; save draft
+                      Assign a primary approver below
                     </span>
                   )}
                 </div>
