@@ -195,46 +195,25 @@ export default function App() {
 
 function AuthCallback({ onProfile }: { onProfile: (p: Profile | null) => void }) {
   const navigate = useNavigate();
+  const [authError, setAuthError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
 
-    // detectSessionInUrl: true (set in supabase.ts) means the Supabase client
-    // auto-exchanges the PKCE code during initialisation. Calling
-    // exchangeCodeForSession() again here would consume the verifier a second
-    // time and produce "invalid flow state". Instead, just listen for the
-    // SIGNED_IN event that fires once the auto-exchange completes.
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        if (cancelled) return;
+    async function handleCallback() {
+      // detectSessionInUrl is false, so we do the PKCE exchange exactly once here.
+      const { data: { session }, error: exchangeError } =
+        await supabase.auth.exchangeCodeForSession(window.location.href);
 
-        if (event === 'SIGNED_IN' && session?.user) {
-          const { data, error: profileError } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', session.user.id)
-            .single();
+      if (cancelled) return;
 
-          if (cancelled) return;
-
-          if (profileError || !data) {
-            console.error('[AuthCallback] Profile fetch failed:', profileError?.message);
-            navigate('/login', { replace: true });
-            return;
-          }
-
-          const p = data as Profile;
-          setCachedProfile(p);
-          onProfile(p);
-          navigate('/dashboard', { replace: true });
-        }
-      },
-    );
-
-    // Fallback: if the SIGNED_IN event never fires (e.g. exchange already
-    // completed before this effect mounted), check for an existing session.
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (cancelled || !session?.user) return;
+      if (exchangeError || !session?.user) {
+        const msg = exchangeError?.message ?? 'No session returned';
+        console.error('[AuthCallback] Exchange failed:', msg);
+        setAuthError(msg);
+        setTimeout(() => { if (!cancelled) navigate('/login', { replace: true }); }, 3000);
+        return;
+      }
 
       const { data, error: profileError } = await supabase
         .from('profiles')
@@ -245,7 +224,10 @@ function AuthCallback({ onProfile }: { onProfile: (p: Profile | null) => void })
       if (cancelled) return;
 
       if (profileError || !data) {
-        navigate('/login', { replace: true });
+        const msg = profileError?.message ?? 'Profile not found';
+        console.error('[AuthCallback] Profile fetch failed:', msg);
+        setAuthError(msg);
+        setTimeout(() => { if (!cancelled) navigate('/login', { replace: true }); }, 3000);
         return;
       }
 
@@ -253,19 +235,24 @@ function AuthCallback({ onProfile }: { onProfile: (p: Profile | null) => void })
       setCachedProfile(p);
       onProfile(p);
       navigate('/dashboard', { replace: true });
-    });
+    }
 
-    // Safety net: if nothing resolves in 15s, go back to login.
-    const timeout = setTimeout(() => {
-      if (!cancelled) navigate('/login', { replace: true });
-    }, 15000);
+    handleCallback();
 
-    return () => {
-      cancelled = true;
-      clearTimeout(timeout);
-      subscription.unsubscribe();
-    };
+    return () => { cancelled = true; };
   }, [navigate, onProfile]);
+
+  if (authError) {
+    return (
+      <div style={styles.center}>
+        <div style={{ textAlign: 'center', color: '#e55', fontFamily: 'sans-serif' }}>
+          <div style={{ fontSize: 14, marginBottom: 8 }}>Sign-in failed</div>
+          <div style={{ fontSize: 12, opacity: 0.7, maxWidth: 340 }}>{authError}</div>
+          <div style={{ fontSize: 11, opacity: 0.5, marginTop: 8 }}>Redirecting to login…</div>
+        </div>
+      </div>
+    );
+  }
 
   return <div style={styles.center}><div style={styles.spinner} /></div>;
 }
