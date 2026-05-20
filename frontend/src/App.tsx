@@ -199,41 +199,72 @@ function AuthCallback({ onProfile }: { onProfile: (p: Profile | null) => void })
   useEffect(() => {
     let cancelled = false;
 
-    // Directly exchange the OAuth code for a session — much faster than
-    // waiting for getSession() + onAuthStateChange chain.
-    supabase.auth.exchangeCodeForSession(window.location.href).then(
-      async ({ data: { session }, error }) => {
+    // detectSessionInUrl: true (set in supabase.ts) means the Supabase client
+    // auto-exchanges the PKCE code during initialisation. Calling
+    // exchangeCodeForSession() again here would consume the verifier a second
+    // time and produce "invalid flow state". Instead, just listen for the
+    // SIGNED_IN event that fires once the auto-exchange completes.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
         if (cancelled) return;
 
-        if (error || !session?.user) {
-          console.error('[AuthCallback] Code exchange failed:', error?.message);
-          navigate('/login', { replace: true });
-          return;
+        if (event === 'SIGNED_IN' && session?.user) {
+          const { data, error: profileError } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', session.user.id)
+            .single();
+
+          if (cancelled) return;
+
+          if (profileError || !data) {
+            console.error('[AuthCallback] Profile fetch failed:', profileError?.message);
+            navigate('/login', { replace: true });
+            return;
+          }
+
+          const p = data as Profile;
+          setCachedProfile(p);
+          onProfile(p);
+          navigate('/dashboard', { replace: true });
         }
-
-        // Fetch profile (auto-created by DB trigger on first login)
-        const { data, error: profileError } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', session.user.id)
-          .single();
-
-        if (cancelled) return;
-
-        if (profileError || !data) {
-          console.error('[AuthCallback] Profile fetch failed:', profileError?.message);
-          navigate('/login', { replace: true });
-          return;
-        }
-
-        const p = data as Profile;
-        setCachedProfile(p);
-        onProfile(p);
-        navigate('/dashboard', { replace: true });
       },
     );
 
-    return () => { cancelled = true; };
+    // Fallback: if the SIGNED_IN event never fires (e.g. exchange already
+    // completed before this effect mounted), check for an existing session.
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (cancelled || !session?.user) return;
+
+      const { data, error: profileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', session.user.id)
+        .single();
+
+      if (cancelled) return;
+
+      if (profileError || !data) {
+        navigate('/login', { replace: true });
+        return;
+      }
+
+      const p = data as Profile;
+      setCachedProfile(p);
+      onProfile(p);
+      navigate('/dashboard', { replace: true });
+    });
+
+    // Safety net: if nothing resolves in 15s, go back to login.
+    const timeout = setTimeout(() => {
+      if (!cancelled) navigate('/login', { replace: true });
+    }, 15000);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timeout);
+      subscription.unsubscribe();
+    };
   }, [navigate, onProfile]);
 
   return <div style={styles.center}><div style={styles.spinner} /></div>;
