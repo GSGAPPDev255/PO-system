@@ -7,7 +7,8 @@ export async function signInWithAzureAD() {
     provider: 'azure',
     options: {
       scopes: 'openid profile email',
-      redirectTo: `${window.location.origin}/auth/callback`,
+      // Use Supabase's hosted callback endpoint; it will redirect back to Site URL
+      redirectTo: 'https://alcfqmolvnjnmylopsgb.supabase.co/auth/v1/callback',
     },
   });
   if (error) throw error;

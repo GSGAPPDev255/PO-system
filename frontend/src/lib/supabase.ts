@@ -14,7 +14,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     flowType: 'pkce',
     autoRefreshToken: true,
     persistSession: true,
-    detectSessionInUrl: false, // AuthCallback handles the PKCE exchange manually
+    detectSessionInUrl: true, // Supabase's hosted callback puts session in URL
   },
 });
 

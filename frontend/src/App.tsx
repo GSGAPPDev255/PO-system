@@ -130,9 +130,6 @@ export default function App() {
 
   return (
     <Routes>
-      {/* Public — auth callback */}
-      <Route path="/auth/callback" element={<AuthCallback onProfile={setProfile} />} />
-
       {/* Public login */}
       <Route
         path="/login"
@@ -193,73 +190,6 @@ export default function App() {
   );
 }
 
-function AuthCallback({ onProfile }: { onProfile: (p: Profile | null) => void }) {
-  const navigate = useNavigate();
-  const [authError, setAuthError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function handleCallback() {
-      // Debug: log the full callback URL and session state
-      console.log('[AuthCallback] URL:', window.location.href);
-      console.log('[AuthCallback] localStorage keys:', Object.keys(localStorage).filter(k => k.includes('supabase') || k.includes('auth') || k.includes('flow')));
-
-      // detectSessionInUrl is false, so we do the PKCE exchange exactly once here.
-      const { data: { session }, error: exchangeError } =
-        await supabase.auth.exchangeCodeForSession(window.location.href);
-
-      if (cancelled) return;
-
-      if (exchangeError || !session?.user) {
-        const msg = exchangeError?.message ?? 'No session returned';
-        console.error('[AuthCallback] Exchange failed:', msg);
-        setAuthError(msg);
-        setTimeout(() => { if (!cancelled) navigate('/login', { replace: true }); }, 3000);
-        return;
-      }
-
-      const { data, error: profileError } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', session.user.id)
-        .single();
-
-      if (cancelled) return;
-
-      if (profileError || !data) {
-        const msg = profileError?.message ?? 'Profile not found';
-        console.error('[AuthCallback] Profile fetch failed:', msg);
-        setAuthError(msg);
-        setTimeout(() => { if (!cancelled) navigate('/login', { replace: true }); }, 3000);
-        return;
-      }
-
-      const p = data as Profile;
-      setCachedProfile(p);
-      onProfile(p);
-      navigate('/dashboard', { replace: true });
-    }
-
-    handleCallback();
-
-    return () => { cancelled = true; };
-  }, [navigate, onProfile]);
-
-  if (authError) {
-    return (
-      <div style={styles.center}>
-        <div style={{ textAlign: 'center', color: '#e55', fontFamily: 'sans-serif' }}>
-          <div style={{ fontSize: 14, marginBottom: 8 }}>Sign-in failed</div>
-          <div style={{ fontSize: 12, opacity: 0.7, maxWidth: 340 }}>{authError}</div>
-          <div style={{ fontSize: 11, opacity: 0.5, marginTop: 8 }}>Redirecting to login…</div>
-        </div>
-      </div>
-    );
-  }
-
-  return <div style={styles.center}><div style={styles.spinner} /></div>;
-}
 
 const styles: Record<string, React.CSSProperties> = {
   center: {
