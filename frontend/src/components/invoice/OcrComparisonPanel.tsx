@@ -36,10 +36,10 @@ export default function OcrComparisonPanel({ ocr, po }: OcrComparisonPanelProps)
       <div style={styles.header}>
         <div>
           <div style={styles.kicker}>§ AI Extraction</div>
-          <h3 style={styles.title}>Gemini vs Finance</h3>
+          <h3 style={styles.title}>AI Read · Finance Verified</h3>
         </div>
         <div style={styles.metaPill}>
-          <span style={styles.metaModel}>{ocr.gemini_model}</span>
+          <span style={styles.metaModel}>Claude Haiku</span>
           <span style={styles.metaDot}>·</span>
           <span style={styles.metaMs}>{ocr.processing_ms}ms</span>
         </div>
