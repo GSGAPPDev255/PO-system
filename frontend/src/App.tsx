@@ -130,6 +130,9 @@ export default function App() {
 
   return (
     <Routes>
+      {/* Auth callback — detectSessionInUrl handles the PKCE exchange automatically */}
+      <Route path="/auth/callback" element={<div style={styles.center}><div style={styles.spinner} /></div>} />
+
       {/* Public login */}
       <Route
         path="/login"
