@@ -201,6 +201,10 @@ function AuthCallback({ onProfile }: { onProfile: (p: Profile | null) => void })
     let cancelled = false;
 
     async function handleCallback() {
+      // Debug: log the full callback URL and session state
+      console.log('[AuthCallback] URL:', window.location.href);
+      console.log('[AuthCallback] localStorage keys:', Object.keys(localStorage).filter(k => k.includes('supabase') || k.includes('auth') || k.includes('flow')));
+
       // detectSessionInUrl is false, so we do the PKCE exchange exactly once here.
       const { data: { session }, error: exchangeError } =
         await supabase.auth.exchangeCodeForSession(window.location.href);
