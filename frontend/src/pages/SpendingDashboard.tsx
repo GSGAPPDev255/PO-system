@@ -257,8 +257,8 @@ export default function SpendingDashboard() {
       }));
   }, [filtered]);
 
-  // Top 10 suppliers
-  const bySupplier = useMemo(() => {
+  // All suppliers (for table)
+  const bySupplierFull = useMemo(() => {
     const map = new Map<string, number>();
     for (const r of filtered) {
       const key = r.supplier_name ?? 'Unknown';
@@ -266,9 +266,11 @@ export default function SpendingDashboard() {
     }
     return Array.from(map.entries())
       .map(([label, value], i) => ({ label, value, color: CHART_ACCENT[i % CHART_ACCENT.length] }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 10);
+      .sort((a, b) => b.value - a.value);
   }, [filtered]);
+
+  // Top 10 suppliers (for chart)
+  const bySupplier = useMemo(() => bySupplierFull.slice(0, 10), [bySupplierFull]);
 
   return (
     <div>
@@ -334,20 +336,7 @@ export default function SpendingDashboard() {
           {/* Supplier table */}
           <div style={{ ...styles.card, gridColumn: '1 / -1' }}>
             <ChartHeader title="Supplier Breakdown" sub="All suppliers ranked by total spend" />
-            <SupplierTable data={bySupplier.concat(
-              /* full list, not just top 10 */
-              useMemo(() => {
-                const map = new Map<string, number>();
-                for (const r of filtered) {
-                  const key = r.supplier_name ?? 'Unknown';
-                  map.set(key, (map.get(key) ?? 0) + Number(r.gross_amount ?? 0));
-                }
-                return Array.from(map.entries())
-                  .map(([label, value], i) => ({ label, value, color: CHART_ACCENT[i % CHART_ACCENT.length] }))
-                  .sort((a, b) => b.value - a.value);
-              // eslint-disable-next-line react-hooks/rules-of-hooks
-              }, [filtered]).slice(bySupplier.length)
-            )} total={totalSpend} />
+            <SupplierTable data={bySupplierFull} total={totalSpend} />
           </div>
         </div>
       )}
