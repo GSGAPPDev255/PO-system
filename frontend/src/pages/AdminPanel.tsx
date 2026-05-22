@@ -111,6 +111,7 @@ function UsersTab() {
   const [accessSaving, setAccessSaving]     = useState<string | null>(null);
   const [loading, setLoading]         = useState(true);
   const [saving, setSaving]           = useState<string | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
   const [msg, setMsg]                 = useState('');
   const [msgType, setMsgType]         = useState<'success' | 'error'>('success');
   const [showInvite, setShowInvite]   = useState(false);
@@ -181,6 +182,24 @@ function UsersTab() {
     const { error } = await supabase.from('profiles').update({ is_active: !current, updated_at: new Date().toISOString() }).eq('id', id);
     if (error) flash('Error: ' + error.message, 'error');
     else { flash('Status updated.'); await load(); }
+    setSaving(null);
+  }
+
+  async function archiveUser(id: string, currentlyArchived: boolean) {
+    if (id === currentUserId) {
+      flash('You cannot archive your own account.', 'error');
+      return;
+    }
+    setSaving(id);
+    const { error } = await supabase
+      .from('profiles')
+      .update({ is_archived: !currentlyArchived, updated_at: new Date().toISOString() })
+      .eq('id', id);
+    if (error) flash('Error: ' + error.message, 'error');
+    else {
+      flash(currentlyArchived ? 'User restored from archive.' : 'User archived — they can no longer sign in.');
+      await load();
+    }
     setSaving(null);
   }
 
@@ -267,6 +286,11 @@ function UsersTab() {
 
   if (loading) return <div style={s.loading}>Loading users…</div>;
 
+  const archivedCount = profiles.filter((p) => (p as Profile & { is_archived?: boolean }).is_archived).length;
+  const visibleProfiles = profiles.filter((p) =>
+    showArchived ? true : !(p as Profile & { is_archived?: boolean }).is_archived
+  );
+
   return (
     <div>
       <SectionHeader
@@ -275,9 +299,20 @@ function UsersTab() {
         msg={msg}
         msgType={msgType}
         actions={
-          <button className="btn" style={s.btnPrimary} onClick={() => setShowInvite((v) => !v)}>
-            {showInvite ? 'Cancel' : '+ Invite User'}
-          </button>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {archivedCount > 0 && (
+              <button
+                className="btn"
+                style={showArchived ? s.btnDanger : s.btnSecondary}
+                onClick={() => setShowArchived((v) => !v)}
+              >
+                {showArchived ? `Hide archived (${archivedCount})` : `Show archived (${archivedCount})`}
+              </button>
+            )}
+            <button className="btn" style={s.btnPrimary} onClick={() => setShowInvite((v) => !v)}>
+              {showInvite ? 'Cancel' : '+ Invite User'}
+            </button>
+          </div>
         }
       />
 
@@ -391,20 +426,21 @@ function UsersTab() {
             </tr>
           </thead>
           <tbody>
-            {profiles.map((p, idx) => {
+            {visibleProfiles.map((p, idx) => {
+              const pEx = p as Profile & { is_archived?: boolean };
+              const isArchived = pEx.is_archived === true;
               const userCompanies = accessMap[p.id] ?? [];
               const isFinance = p.role === 'finance';
               const isExpanded = expandedAccess === p.id;
               const isSelf = p.id === currentUserId;
               return (
                 <>
-                  <tr key={p.id} style={{ ...s.row, ...(idx % 2 === 1 ? s.rowAlt : {}) }}>
+                  <tr key={p.id} style={{ ...s.row, ...(idx % 2 === 1 ? s.rowAlt : {}), opacity: isArchived ? 0.5 : 1 }}>
                     <td style={s.td}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <div style={s.name}>{p.display_name}</div>
-                        {isSelf && (
-                          <span style={gu.youBadge}>You</span>
-                        )}
+                        {isSelf && <span style={gu.youBadge}>You</span>}
+                        {isArchived && <span style={gu.archivedBadge}>Archived</span>}
                       </div>
                     </td>
                     <td style={{ ...s.td, ...s.mono }}>{p.email}</td>
@@ -424,17 +460,11 @@ function UsersTab() {
                           {p.role === 'admin' || p.role === 'auditor' ? 'All (by role)' : '—'}
                         </span>
                       ) : userCompanies.length === 0 ? (
-                        <button
-                          style={ua.accessChipAll}
-                          onClick={() => setExpandedAccess(isExpanded ? null : p.id)}
-                        >
+                        <button style={ua.accessChipAll} onClick={() => setExpandedAccess(isExpanded ? null : p.id)}>
                           All schools ↓
                         </button>
                       ) : (
-                        <button
-                          style={ua.accessChipLimited}
-                          onClick={() => setExpandedAccess(isExpanded ? null : p.id)}
-                        >
+                        <button style={ua.accessChipLimited} onClick={() => setExpandedAccess(isExpanded ? null : p.id)}>
                           {userCompanies.length} school{userCompanies.length !== 1 ? 's' : ''} ↓
                         </button>
                       )}
@@ -443,16 +473,25 @@ function UsersTab() {
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
                         <span style={{
                           ...s.statusDot,
-                          background: p.is_active ? 'var(--success)' : 'var(--ink-faint)',
+                          background: isArchived ? 'rgba(139,92,246,0.4)' : p.is_active ? 'var(--success)' : 'var(--ink-faint)',
                         }} />
-                        <span style={{ fontSize: 12, color: p.is_active ? 'var(--ink)' : 'var(--ink-faint)' }}>
-                          {p.is_active ? 'Active' : 'Inactive'}
+                        <span style={{ fontSize: 12, color: isArchived ? 'var(--ink-faint)' : p.is_active ? 'var(--ink)' : 'var(--ink-faint)' }}>
+                          {isArchived ? 'Archived' : p.is_active ? 'Active' : 'Inactive'}
                         </span>
                       </span>
                     </td>
                     <td style={{ ...s.td, textAlign: 'right' }}>
                       {isSelf ? (
                         <span style={gu.selfLockNote}>Your account — protected</span>
+                      ) : isArchived ? (
+                        <button
+                          className="btn"
+                          style={s.btnSecondary}
+                          disabled={saving === p.id}
+                          onClick={() => archiveUser(p.id, true)}
+                        >
+                          {saving === p.id ? '…' : 'Restore'}
+                        </button>
                       ) : (
                         <div style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
                           <select
@@ -471,6 +510,17 @@ function UsersTab() {
                           >
                             {saving === p.id ? '…' : p.is_active ? 'Deactivate' : 'Activate'}
                           </button>
+                          {!p.is_active && (
+                            <button
+                              className="btn"
+                              style={gu.archiveBtn}
+                              disabled={saving === p.id}
+                              onClick={() => archiveUser(p.id, false)}
+                              title="Archive — hide this user from the list"
+                            >
+                              Archive
+                            </button>
+                          )}
                         </div>
                       )}
                     </td>
@@ -2213,5 +2263,29 @@ const gu: Record<string, React.CSSProperties> = {
     color: 'var(--ink-faint)',
     fontStyle: 'italic',
     fontFamily: 'var(--font-display)',
+  },
+  archivedBadge: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    padding: '2px 8px',
+    borderRadius: 999,
+    fontSize: 9.5,
+    fontWeight: 700,
+    letterSpacing: '0.14em',
+    textTransform: 'uppercase' as const,
+    background: 'rgba(139,92,246,0.1)',
+    color: '#A78BFA',
+    border: '1px solid rgba(139,92,246,0.25)',
+    flexShrink: 0,
+  },
+  archiveBtn: {
+    padding: '7px 14px',
+    fontSize: 12,
+    borderRadius: 6,
+    background: 'rgba(139,92,246,0.08)',
+    color: '#A78BFA',
+    border: '1px solid rgba(139,92,246,0.25)',
+    fontWeight: 500,
+    cursor: 'pointer',
   },
 };
