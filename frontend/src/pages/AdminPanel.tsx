@@ -1320,25 +1320,49 @@ const FUNCTIONS: FnStatus[] = [
 ];
 
 function SystemTab() {
-  const [triggering, setTriggering] = useState<string | null>(null);
-  const [results, setResults]       = useState<Record<string, string>>({});
-  const [stats, setStats]           = useState<{ pos: number; files: number; exports: number } | null>(null);
+  const [triggering, setTriggering]   = useState<string | null>(null);
+  const [results, setResults]         = useState<Record<string, string>>({});
+  const [stats, setStats]             = useState<{ pos: number; files: number; exports: number; pending: number } | null>(null);
   const [sendingReminders, setSendingReminders] = useState(false);
+  const [intakeStatus, setIntakeStatus] = useState<'idle' | 'checking' | 'ok' | 'error'>('idle');
+  const [intakeDetail, setIntakeDetail] = useState('');
 
   useEffect(() => {
     (async () => {
-      const [posRes, filesRes, exportsRes] = await Promise.all([
+      const [posRes, filesRes, exportsRes, pendingRes] = await Promise.all([
         supabase.from('purchase_orders').select('id', { count: 'exact', head: true }),
         supabase.from('invoice_files').select('id', { count: 'exact', head: true }),
         supabase.from('csv_exports').select('id', { count: 'exact', head: true }),
+        supabase.from('purchase_orders').select('id', { count: 'exact', head: true }).eq('status', 'pending_finance_review'),
       ]);
       setStats({
         pos:     posRes.count ?? 0,
         files:   filesRes.count ?? 0,
         exports: exportsRes.count ?? 0,
+        pending: pendingRes.count ?? 0,
       });
     })();
   }, []);
+
+  async function checkEmailIntake() {
+    setIntakeStatus('checking');
+    setIntakeDetail('');
+    try {
+      const { data, error } = await supabase.functions.invoke('email-intake', { method: 'POST' });
+      if (error) {
+        setIntakeStatus('error');
+        setIntakeDetail(error.message);
+      } else {
+        const text = typeof data === 'object' ? JSON.stringify(data, null, 2) : String(data);
+        const isError = text.toLowerCase().includes('error') || text.toLowerCase().includes('failed');
+        setIntakeStatus(isError ? 'error' : 'ok');
+        setIntakeDetail(text);
+      }
+    } catch (e) {
+      setIntakeStatus('error');
+      setIntakeDetail((e as Error).message);
+    }
+  }
 
   async function trigger(name: string) {
     setTriggering(name);
@@ -1395,9 +1419,55 @@ function SystemTab() {
         <div style={s.statsRow}>
           <StatCard label="Invoice files" value={stats.files} />
           <StatCard label="Purchase orders" value={stats.pos} />
+          <StatCard label="Pending review" value={stats.pending} />
           <StatCard label="Sage exports" value={stats.exports} />
         </div>
       )}
+
+      {/* Email intake health check */}
+      <div style={sy.healthCard}>
+        <div style={sy.healthHeader}>
+          <div>
+            <div style={sy.healthKicker}>§ Email intake</div>
+            <div style={sy.healthTitle}>Mailbox connection</div>
+            <div style={sy.healthSub}>
+              Tests the Microsoft Graph connection and checks for new emails in the finance mailbox.
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            {intakeStatus !== 'idle' && (
+              <span style={{
+                ...sy.statusPill,
+                ...(intakeStatus === 'ok' ? sy.statusPillOk
+                  : intakeStatus === 'error' ? sy.statusPillError
+                  : sy.statusPillChecking),
+              }}>
+                {intakeStatus === 'checking' ? '⏳ Checking…'
+                  : intakeStatus === 'ok' ? '✓ Connected'
+                  : '✗ Error'}
+              </span>
+            )}
+            <button
+              className="btn"
+              style={s.btnPrimary}
+              disabled={intakeStatus === 'checking'}
+              onClick={checkEmailIntake}
+            >
+              {intakeStatus === 'checking' ? 'Checking…' : 'Test connection'}
+            </button>
+          </div>
+        </div>
+        {intakeDetail && (
+          <div style={{
+            ...sy.healthResult,
+            borderColor: intakeStatus === 'ok' ? 'rgba(16,185,129,0.2)' : 'rgba(244,63,94,0.2)',
+            background: intakeStatus === 'ok' ? 'rgba(16,185,129,0.05)' : 'rgba(244,63,94,0.05)',
+            color: intakeStatus === 'ok' ? 'var(--success)' : 'var(--danger)',
+          }}>
+            <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{intakeDetail}</pre>
+          </div>
+        )}
+      </div>
 
       {results['manual-reminders'] && (
         <div style={{ ...s.card, marginBottom: 20, backgroundColor: 'var(--paper-bright)', borderLeft: '3px solid var(--accent)' }}>
@@ -1406,23 +1476,6 @@ function SystemTab() {
           </div>
         </div>
       )}
-
-      <div style={s.warningBox}>
-        <div style={s.warningKicker}>§ Setup Required</div>
-        <div style={s.warningTitle}>Email intake is returning errors</div>
-        <div style={s.warningBody}>
-          The <strong>email-intake</strong> and <strong>sync-approvers</strong> functions are failing because
-          the Azure App Registration needs <strong>Application permissions</strong> (not just Delegated) for
-          Microsoft Graph. Follow these steps to fix:
-          <ol style={s.warningList}>
-            <li>Open <strong>Azure Portal → App Registrations → your app → API Permissions</strong></li>
-            <li>Click <strong>Add a permission → Microsoft Graph → Application permissions</strong></li>
-            <li>Add: <code style={s.code}>Mail.ReadWrite</code> and <code style={s.code}>User.Read.All</code></li>
-            <li>Click <strong>Grant admin consent</strong> (requires Azure AD Global Admin)</li>
-            <li>Come back and click <strong>Run</strong> next to Email intake to test</li>
-          </ol>
-        </div>
-      </div>
 
       <div style={s.card}>
         <table style={s.table}>
@@ -1876,7 +1929,7 @@ const s: Record<string, React.CSSProperties> = {
 
   statsRow: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(3, 1fr)',
+    gridTemplateColumns: 'repeat(4, 1fr)',
     gap: 14,
     marginBottom: 18,
   },
@@ -1907,45 +1960,82 @@ const s: Record<string, React.CSSProperties> = {
     fontVariationSettings: "'opsz' 144, 'SOFT' 40",
   },
 
-  warningBox: {
-    background: 'var(--warning-soft)',
-    border: '1px solid rgba(154, 107, 30, 0.3)',
+};
+
+// ─── System Tab styles ─────────────────────────────────────────────────────────
+
+const sy: Record<string, React.CSSProperties> = {
+  healthCard: {
+    background: 'var(--paper-bright)',
+    border: '1px solid var(--line)',
     borderRadius: 10,
-    padding: '20px 22px',
+    padding: '22px 24px',
     marginBottom: 18,
   },
-  warningKicker: {
+  healthHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 16,
+    flexWrap: 'wrap',
+  },
+  healthKicker: {
     fontFamily: 'var(--font-mono)',
-    fontSize: 10.5,
-    color: 'var(--warning)',
+    fontSize: 10,
+    color: 'var(--accent)',
     fontWeight: 600,
-    letterSpacing: '0.14em',
+    letterSpacing: '0.16em',
     textTransform: 'uppercase',
-    marginBottom: 6,
+    marginBottom: 4,
   },
-  warningTitle: {
+  healthTitle: {
     fontFamily: 'var(--font-display)',
-    fontSize: 18,
-    fontWeight: 500,
-    color: 'var(--warning)',
-    marginBottom: 10,
-    letterSpacing: '-0.01em',
+    fontSize: 20,
+    fontWeight: 400,
+    color: 'var(--ink)',
+    letterSpacing: '-0.015em',
+    marginBottom: 4,
   },
-  warningBody: {
-    fontSize: 13,
-    color: 'var(--warning)',
-    lineHeight: 1.65,
+  healthSub: {
+    fontSize: 12.5,
+    color: 'var(--ink-muted)',
+    lineHeight: 1.5,
+    maxWidth: 520,
   },
-  warningList: {
-    marginTop: 10,
-    paddingLeft: 20,
-    lineHeight: 1.8,
-  },
-  code: {
-    background: 'rgba(154, 107, 30, 0.12)',
-    padding: '1px 7px',
-    borderRadius: 4,
+  statusPill: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    padding: '5px 12px',
+    borderRadius: 999,
+    fontSize: 11,
+    fontWeight: 600,
     fontFamily: 'var(--font-mono)',
-    fontSize: 11.5,
+    letterSpacing: '0.06em',
+  },
+  statusPillOk: {
+    background: 'rgba(16,185,129,0.1)',
+    color: 'var(--success)',
+    border: '1px solid rgba(16,185,129,0.3)',
+  },
+  statusPillError: {
+    background: 'rgba(244,63,94,0.1)',
+    color: 'var(--danger)',
+    border: '1px solid rgba(244,63,94,0.3)',
+  },
+  statusPillChecking: {
+    background: 'var(--accent-soft)',
+    color: 'var(--accent-text)',
+    border: '1px solid rgba(0,198,224,0.25)',
+  },
+  healthResult: {
+    marginTop: 16,
+    padding: '14px 16px',
+    borderRadius: 8,
+    border: '1px solid',
+    fontSize: 12,
+    fontFamily: 'var(--font-mono)',
+    lineHeight: 1.6,
+    maxHeight: 240,
+    overflowY: 'auto',
   },
 };
