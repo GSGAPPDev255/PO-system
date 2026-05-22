@@ -40,6 +40,8 @@ export default function InvoiceReview() {
   const [vat2, setVat2] = useState<Partial<VatLine>>({});
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [showDismissConfirm, setShowDismissConfirm] = useState(false);
+  const [dismissing, setDismissing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string[] | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -230,6 +232,33 @@ export default function InvoiceReview() {
     }
   };
 
+  const handleDismiss = async () => {
+    setShowDismissConfirm(false);
+    setDismissing(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      await supabase
+        .from('purchase_orders')
+        .update({ status: 'dismissed', updated_by_id: user?.id })
+        .eq('id', id!);
+      await supabase.from('audit_log').insert({
+        purchase_order_id: id,
+        action: 'status_changed',
+        actor_id: user?.id,
+        actor_email: user?.email,
+        actor_display: 'Finance',
+        new_values: { status: 'dismissed' },
+        metadata: { reason: 'Dismissed from invoice review — not applicable' },
+      });
+      qc.invalidateQueries({ queryKey: ['invoices'] });
+      navigate('/dashboard');
+    } catch (e) {
+      setSaveError([(e as Error).message]);
+    } finally {
+      setDismissing(false);
+    }
+  };
+
   return (
     <div style={styles.page}>
       {/* Masthead */}
@@ -254,6 +283,17 @@ export default function InvoiceReview() {
 
             {isEditable && (
               <div style={styles.headerActions}>
+                {poData.status === 'pending_finance_review' && (
+                  <button
+                    className="btn"
+                    style={styles.dismissBtn}
+                    onClick={() => setShowDismissConfirm(true)}
+                    disabled={dismissing}
+                    title="Mark as not applicable and hide from the main view"
+                  >
+                    {dismissing ? 'Dismissing…' : '✕ Dismiss'}
+                  </button>
+                )}
                 <button
                   className="btn"
                   style={styles.saveBtn}
@@ -515,6 +555,16 @@ export default function InvoiceReview() {
           onCancel={() => setShowConfirm(false)}
         />
       )}
+
+      {showDismissConfirm && (
+        <ConfirmDialog
+          title="Dismiss Invoice"
+          message="This will mark the record as 'Not Applicable' and hide it from the main ledger view. It can still be found using the Dismissed filter. This action can be undone by finance."
+          confirmLabel="Dismiss record"
+          onConfirm={handleDismiss}
+          onCancel={() => setShowDismissConfirm(false)}
+        />
+      )}
     </div>
   );
 }
@@ -644,6 +694,15 @@ const styles: Record<string, React.CSSProperties> = {
   },
   subSep: { color: 'var(--ink-faint)' },
   headerActions: { display: 'flex', gap: 10, alignItems: 'flex-start' },
+  dismissBtn: {
+    padding: '10px 20px',
+    background: 'transparent',
+    border: '1px solid rgba(244, 63, 94, 0.3)',
+    color: 'var(--danger)',
+    borderRadius: 8,
+    fontSize: 13,
+    fontWeight: 500,
+  },
   saveBtn: {
     padding: '10px 20px',
     background: 'transparent',
