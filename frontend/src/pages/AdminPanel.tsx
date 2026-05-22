@@ -92,6 +92,15 @@ export default function AdminPanel() {
 interface InviteForm { email: string; display_name: string; role: UserRole }
 const EMPTY_INVITE: InviteForm = { email: '', display_name: '', role: 'finance' };
 
+interface GalUser {
+  id: string;
+  displayName: string;
+  mail: string | null;
+  userPrincipalName: string;
+  department: string | null;
+  jobTitle: string | null;
+}
+
 interface CompanyAccess { profile_id: string; company: string }
 
 function UsersTab() {
@@ -108,6 +117,10 @@ function UsersTab() {
   const [inviting, setInviting]       = useState(false);
   const [inviteForm, setInviteForm]   = useState<InviteForm>(EMPTY_INVITE);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  // GAL search
+  const [galQuery, setGalQuery]       = useState('');
+  const [galResults, setGalResults]   = useState<GalUser[]>([]);
+  const [galSearching, setGalSearching] = useState(false);
 
   function flash(m: string, type: 'success' | 'error' = 'success') {
     setMsg(m); setMsgType(type);
@@ -200,6 +213,33 @@ function UsersTab() {
     setAccessSaving(null);
   }
 
+  // Debounced GAL search
+  useEffect(() => {
+    if (galQuery.trim().length < 2) { setGalResults([]); return; }
+    const timer = setTimeout(async () => {
+      setGalSearching(true);
+      try {
+        const { data, error } = await supabase.functions.invoke('admin-actions', {
+          body: { action: 'search_gal', query: galQuery.trim() },
+        });
+        if (!error && data?.users) setGalResults(data.users as GalUser[]);
+        else setGalResults([]);
+      } catch { setGalResults([]); }
+      setGalSearching(false);
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [galQuery]);
+
+  function selectGalUser(u: GalUser) {
+    setInviteForm({
+      ...inviteForm,
+      email: (u.mail ?? u.userPrincipalName).toLowerCase(),
+      display_name: u.displayName,
+    });
+    setGalQuery('');
+    setGalResults([]);
+  }
+
   async function inviteUser() {
     const { email, display_name, role } = inviteForm;
     if (!email.trim() || !display_name.trim()) {
@@ -215,6 +255,8 @@ function UsersTab() {
       if (data?.error) throw new Error(data.error);
       flash(`Invitation sent to ${email.trim().toLowerCase()}`);
       setInviteForm(EMPTY_INVITE);
+      setGalQuery('');
+      setGalResults([]);
       setShowInvite(false);
       await load();
     } catch (e) {
@@ -244,9 +286,52 @@ function UsersTab() {
           <div style={s.addFormKicker}>§ New invite</div>
           <div style={s.addFormTitle}>Invite a new user</div>
           <div style={s.addFormSub}>
-            They'll receive an email with a link to set a password and sign in.
+            Search the directory to find someone, or type their details manually. They'll receive an invitation email with a sign-in link.
           </div>
-          <div style={{ ...s.formGrid, marginTop: 16 }}>
+
+          {/* GAL search */}
+          <div style={{ marginTop: 16, marginBottom: 4 }}>
+            <label style={s.label}>Search directory (Azure AD)</label>
+            <div style={{ position: 'relative', marginTop: 6 }}>
+              <input
+                style={{ ...s.input, width: '100%', boxSizing: 'border-box', paddingLeft: 36 }}
+                value={galQuery}
+                placeholder="Type a name or email to search…"
+                onChange={(e) => setGalQuery(e.target.value)}
+              />
+              <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', fontSize: 13, color: 'var(--ink-faint)', pointerEvents: 'none' }}>
+                {galSearching ? '⏳' : '⌕'}
+              </span>
+            </div>
+
+            {/* Results dropdown */}
+            {galResults.length > 0 && (
+              <div style={gi.dropdown}>
+                {galResults.map((u) => (
+                  <button
+                    key={u.id}
+                    style={gi.dropdownItem}
+                    onClick={() => selectGalUser(u)}
+                  >
+                    <div style={gi.dropdownName}>{u.displayName}</div>
+                    <div style={gi.dropdownMeta}>
+                      {(u.mail ?? u.userPrincipalName).toLowerCase()}
+                      {u.department && <> · {u.department}</>}
+                      {u.jobTitle && <> · {u.jobTitle}</>}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+            {galQuery.trim().length >= 2 && !galSearching && galResults.length === 0 && (
+              <div style={{ fontSize: 11.5, color: 'var(--ink-faint)', marginTop: 6, fontStyle: 'italic' }}>
+                No results found — fill in manually below.
+              </div>
+            )}
+          </div>
+
+          {/* Manual fields (pre-filled from GAL selection) */}
+          <div style={{ ...s.formGrid, marginTop: 14 }}>
             <div style={s.formGroup}>
               <label style={s.label}>Email address *</label>
               <input
@@ -286,7 +371,7 @@ function UsersTab() {
             <button className="btn" style={s.btnPrimary} disabled={inviting} onClick={inviteUser}>
               {inviting ? 'Sending…' : 'Send invitation →'}
             </button>
-            <button className="btn" style={s.btnSecondary} onClick={() => { setShowInvite(false); setInviteForm(EMPTY_INVITE); }}>
+            <button className="btn" style={s.btnSecondary} onClick={() => { setShowInvite(false); setInviteForm(EMPTY_INVITE); setGalQuery(''); setGalResults([]); }}>
               Cancel
             </button>
           </div>
@@ -2065,6 +2150,44 @@ const sy: Record<string, React.CSSProperties> = {
     lineHeight: 1.6,
     maxHeight: 240,
     overflowY: 'auto',
+  },
+};
+
+// ─── GAL invite search styles ─────────────────────────────────────────────────
+
+const gi: Record<string, React.CSSProperties> = {
+  dropdown: {
+    marginTop: 4,
+    background: 'var(--paper-bright)',
+    border: '1px solid var(--line-strong)',
+    borderRadius: 8,
+    overflow: 'hidden',
+    boxShadow: '0 8px 24px -8px rgba(20,24,31,0.18)',
+    zIndex: 10,
+    maxHeight: 280,
+    overflowY: 'auto',
+  },
+  dropdownItem: {
+    display: 'block',
+    width: '100%',
+    textAlign: 'left',
+    padding: '10px 14px',
+    background: 'none',
+    border: 'none',
+    borderBottom: '1px solid var(--line)',
+    cursor: 'pointer',
+    transition: 'background 0.1s var(--ease)',
+  },
+  dropdownName: {
+    fontSize: 13,
+    fontWeight: 500,
+    color: 'var(--ink)',
+    marginBottom: 2,
+  },
+  dropdownMeta: {
+    fontSize: 11,
+    color: 'var(--ink-faint)',
+    fontFamily: 'var(--font-mono)',
   },
 };
 
