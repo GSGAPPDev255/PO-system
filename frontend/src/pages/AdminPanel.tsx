@@ -1339,6 +1339,7 @@ interface FnStatus { name: string; label: string; schedule: string }
 const FUNCTIONS: FnStatus[] = [
   { name: 'email-intake',       label: 'Email intake',        schedule: 'Every 5 minutes' },
   { name: 'reminder-scheduler', label: 'Reminder scheduler',  schedule: 'Daily · 08:00 UTC' },
+  { name: 'sync-approvers',     label: 'Sync approvers',      schedule: 'Daily · 09:00 UTC' },
   { name: 'gemini-processor',   label: 'Gemini processor',    schedule: 'On-demand' },
   { name: 'send-approval',      label: 'Send approval',       schedule: 'On-demand' },
   { name: 'process-approval',   label: 'Process approval',    schedule: 'On-demand' },
