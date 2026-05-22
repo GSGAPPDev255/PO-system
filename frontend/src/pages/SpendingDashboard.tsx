@@ -192,13 +192,24 @@ export default function SpendingDashboard() {
   useEffect(() => {
     (async () => {
       setLoading(true);
-      const { data } = await supabase
-        .from('purchase_orders')
-        .select('id, supplier_name, company, gross_amount, net_amount, transaction_date, status, created_at')
-        .in('status', SETTLED_STATUSES)
-        .order('transaction_date', { ascending: true });
-      setRecords((data as SpendRecord[] | null) ?? []);
-      setLoading(false);
+      try {
+        const { data, error } = await supabase
+          .from('purchase_orders')
+          .select('id, supplier_name, company, gross_amount, net_amount, transaction_date, status, created_at')
+          .in('status', SETTLED_STATUSES)
+          .order('transaction_date', { ascending: true });
+
+        if (error) {
+          console.error('Failed to fetch spending data:', error.message, error.details);
+        }
+
+        setRecords((data as SpendRecord[] | null) ?? []);
+      } catch (err) {
+        console.error('Unexpected error fetching spending data:', err);
+        setRecords([]);
+      } finally {
+        setLoading(false);
+      }
     })();
   }, []);
 

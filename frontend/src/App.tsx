@@ -173,11 +173,46 @@ export default function App() {
                 <Route path="/" element={<Navigate to="/dashboard" replace />} />
 
                 {/* ── Finance / admin / auditor routes ─────────────── */}
-                <Route path="/dashboard" element={<FinanceDashboard />} />
-                <Route path="/invoices/:id" element={<InvoiceReview />} />
-                <Route path="/export" element={<ExportManagement />} />
-                <Route path="/spend" element={<SpendingDashboard />} />
-                <Route path="/audit/:id" element={<AuditTrailViewer />} />
+                <Route
+                  path="/dashboard"
+                  element={
+                    profile?.role && ['finance', 'admin', 'auditor'].includes(profile.role)
+                      ? <FinanceDashboard />
+                      : <Navigate to="/login" replace />
+                  }
+                />
+                <Route
+                  path="/invoices/:id"
+                  element={
+                    profile?.role && ['finance', 'admin', 'auditor'].includes(profile.role)
+                      ? <InvoiceReview />
+                      : <Navigate to="/login" replace />
+                  }
+                />
+                <Route
+                  path="/export"
+                  element={
+                    profile?.role && ['finance', 'admin', 'auditor'].includes(profile.role)
+                      ? <ExportManagement />
+                      : <Navigate to="/login" replace />
+                  }
+                />
+                <Route
+                  path="/spend"
+                  element={
+                    profile?.role && ['finance', 'admin', 'auditor'].includes(profile.role)
+                      ? <SpendingDashboard />
+                      : <Navigate to="/login" replace />
+                  }
+                />
+                <Route
+                  path="/audit/:id"
+                  element={
+                    profile?.role && ['finance', 'admin', 'auditor'].includes(profile.role)
+                      ? <AuditTrailViewer />
+                      : <Navigate to="/login" replace />
+                  }
+                />
                 <Route
                   path="/admin"
                   element={
