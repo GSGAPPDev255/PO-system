@@ -46,6 +46,13 @@ const STATUS_CONFIG: Record<
     bg:    'rgba(255,255,255,0.04)',
     border: 'var(--line)',
   },
+  dismissed: {
+    label: 'Dismissed',
+    dot:   'var(--ink-faint)',
+    text:  'var(--ink-faint)',
+    bg:    'transparent',
+    border: 'var(--line)',
+  },
 };
 
 export default function StatusBadge({ status }: { status: InvoiceStatus }) {

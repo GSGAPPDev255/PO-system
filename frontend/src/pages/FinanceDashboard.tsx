@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { format, parseISO, isValid } from 'date-fns';
 import { useInvoices } from '../hooks/useInvoices';
 import StatusBadge from '../components/shared/StatusBadge';
@@ -14,6 +15,7 @@ const STATUS_FILTERS: { label: string; value: InvoiceStatus | 'all' }[] = [
   { label: 'Rejected',         value: 'rejected' },
   { label: 'Ready to Export',  value: 'approved_ready_export' },
   { label: 'Exported',         value: 'exported' },
+  { label: 'Dismissed',        value: 'dismissed' },
 ];
 
 function fmtDate(raw: string): string {
@@ -39,6 +41,22 @@ export default function FinanceDashboard() {
     { label: 'All', value: 'all' },
   ]);
   const navigate = useNavigate();
+  const qc = useQueryClient();
+
+  const handleDismiss = async (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    if (!confirm('Mark this record as dismissed? It will be hidden from the main view.')) return;
+    await supabase.from('purchase_orders').update({ status: 'dismissed' }).eq('id', id);
+    await supabase.from('audit_log').insert({
+      purchase_order_id: id,
+      action: 'status_changed',
+      actor_email: 'finance',
+      actor_display: 'Finance (manual dismiss)',
+      new_values: { status: 'dismissed' },
+      metadata: { reason: 'Not applicable — dismissed from dashboard' },
+    });
+    qc.invalidateQueries({ queryKey: ['invoices'] });
+  };
 
   // Load companies dynamically from DB
   useEffect(() => {
@@ -63,6 +81,10 @@ export default function FinanceDashboard() {
 
   const filtered = useMemo(() => {
     let result = invoices;
+    // Hide dismissed from the default "All" view — only show when explicitly filtered
+    if (statusFilter === 'all') {
+      result = result.filter((i) => i.status !== 'dismissed');
+    }
     if (companyFilter !== 'all') {
       result = result.filter((i) => (i as unknown as Record<string, unknown>).company === companyFilter);
     }
@@ -250,6 +272,15 @@ export default function FinanceDashboard() {
                       <td style={{ ...styles.td, textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
                         <button style={styles.rowBtnPrimary} onClick={() => navigate(`/invoices/${inv.id}`)}>Review <span style={{ opacity: 0.6 }}>→</span></button>
                         <button style={styles.rowBtn} onClick={() => navigate(`/audit/${inv.id}`)}>Audit</button>
+                        {inv.status !== 'dismissed' && (
+                          <button
+                            style={{ ...styles.rowBtn, color: 'var(--ink-faint)', borderColor: 'var(--line)' }}
+                            onClick={(e) => handleDismiss(e, inv.id)}
+                            title="Mark as not applicable — hides from main view"
+                          >
+                            ✕ Dismiss
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );

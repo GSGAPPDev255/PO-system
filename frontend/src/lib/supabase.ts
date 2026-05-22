@@ -26,7 +26,8 @@ export type InvoiceStatus =
   | 'approved'
   | 'rejected'
   | 'approved_ready_export'
-  | 'exported';
+  | 'exported'
+  | 'dismissed';
 
 export type UserRole = 'finance' | 'approver' | 'auditor' | 'admin' | 'staff';
 export type AuditAction =
