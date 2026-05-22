@@ -92,15 +92,21 @@ export default function AdminPanel() {
 interface InviteForm { email: string; display_name: string; role: UserRole }
 const EMPTY_INVITE: InviteForm = { email: '', display_name: '', role: 'finance' };
 
+interface CompanyAccess { profile_id: string; company: string }
+
 function UsersTab() {
-  const [profiles, setProfiles]     = useState<Profile[]>([]);
-  const [loading, setLoading]       = useState(true);
-  const [saving, setSaving]         = useState<string | null>(null);
-  const [msg, setMsg]               = useState('');
-  const [msgType, setMsgType]       = useState<'success' | 'error'>('success');
-  const [showInvite, setShowInvite] = useState(false);
-  const [inviting, setInviting]     = useState(false);
-  const [inviteForm, setInviteForm] = useState<InviteForm>(EMPTY_INVITE);
+  const [profiles, setProfiles]       = useState<Profile[]>([]);
+  const [companies, setCompanies]     = useState<{ slug: string; name: string }[]>([]);
+  const [accessMap, setAccessMap]     = useState<Record<string, string[]>>({});  // profile_id → company slugs
+  const [expandedAccess, setExpandedAccess] = useState<string | null>(null);  // profile_id being edited
+  const [accessSaving, setAccessSaving]     = useState<string | null>(null);
+  const [loading, setLoading]         = useState(true);
+  const [saving, setSaving]           = useState<string | null>(null);
+  const [msg, setMsg]                 = useState('');
+  const [msgType, setMsgType]         = useState<'success' | 'error'>('success');
+  const [showInvite, setShowInvite]   = useState(false);
+  const [inviting, setInviting]       = useState(false);
+  const [inviteForm, setInviteForm]   = useState<InviteForm>(EMPTY_INVITE);
 
   function flash(m: string, type: 'success' | 'error' = 'success') {
     setMsg(m); setMsgType(type);
@@ -110,9 +116,21 @@ function UsersTab() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase.from('profiles').select('*').order('display_name');
-      if (error) { setMsg('Could not load users: ' + error.message); setMsgType('error'); }
-      setProfiles((data as Profile[]) ?? []);
+      const [profilesRes, companiesRes, accessRes] = await Promise.all([
+        supabase.from('profiles').select('*').order('display_name'),
+        supabase.from('companies').select('slug, name').eq('is_active', true).order('name'),
+        supabase.from('profile_company_access').select('profile_id, company'),
+      ]);
+      if (profilesRes.error) { setMsg('Could not load users: ' + profilesRes.error.message); setMsgType('error'); }
+      setProfiles((profilesRes.data as Profile[]) ?? []);
+      setCompanies((companiesRes.data as { slug: string; name: string }[]) ?? []);
+      // Build access map: profile_id → [company slugs]
+      const map: Record<string, string[]> = {};
+      for (const row of (accessRes.data as CompanyAccess[]) ?? []) {
+        if (!map[row.profile_id]) map[row.profile_id] = [];
+        map[row.profile_id].push(row.company);
+      }
+      setAccessMap(map);
     } catch (e) {
       setMsg('Load failed: ' + (e as Error).message); setMsgType('error');
     } finally {
@@ -136,6 +154,35 @@ function UsersTab() {
     if (error) flash('Error: ' + error.message, 'error');
     else { flash('Status updated.'); await load(); }
     setSaving(null);
+  }
+
+  async function saveCompanyAccess(profileId: string, selectedSlugs: string[]) {
+    setAccessSaving(profileId);
+    try {
+      // Delete existing then insert selected — simple replace approach
+      const { error: delError } = await supabase
+        .from('profile_company_access')
+        .delete()
+        .eq('profile_id', profileId);
+      if (delError) throw new Error(delError.message);
+
+      if (selectedSlugs.length > 0) {
+        const rows = selectedSlugs.map((company) => ({ profile_id: profileId, company }));
+        const { error: insError } = await supabase
+          .from('profile_company_access')
+          .insert(rows);
+        if (insError) throw new Error(insError.message);
+      }
+
+      flash(selectedSlugs.length === 0
+        ? 'Access reset — user can now see all companies.'
+        : `Access saved — ${selectedSlugs.length} school${selectedSlugs.length !== 1 ? 's' : ''} assigned.`);
+      setExpandedAccess(null);
+      await load();
+    } catch (e) {
+      flash('Error: ' + (e as Error).message, 'error');
+    }
+    setAccessSaving(null);
   }
 
   async function inviteUser() {
@@ -238,60 +285,104 @@ function UsersTab() {
               <th style={s.th}>Name</th>
               <th style={s.th}>Email</th>
               <th style={s.th}>Role</th>
+              <th style={s.th}>School access</th>
               <th style={s.th}>Status</th>
-              <th style={s.th}>Joined</th>
               <th style={{ ...s.th, textAlign: 'right' }}>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {profiles.map((p, idx) => (
-              <tr key={p.id} style={{ ...s.row, ...(idx % 2 === 1 ? s.rowAlt : {}) }}>
-                <td style={s.td}><div style={s.name}>{p.display_name}</div></td>
-                <td style={{ ...s.td, ...s.mono }}>{p.email}</td>
-                <td style={s.td}>
-                  <span style={{
-                    ...s.roleBadge,
-                    background: ROLE_TINTS[p.role].bg,
-                    color: ROLE_TINTS[p.role].color,
-                    border: `1px solid ${ROLE_TINTS[p.role].border}`,
-                  }}>
-                    {p.role}
-                  </span>
-                </td>
-                <td style={s.td}>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
-                    <span style={{
-                      ...s.statusDot,
-                      background: p.is_active ? 'var(--success)' : 'var(--ink-faint)',
-                    }} />
-                    <span style={{ fontSize: 12, color: p.is_active ? 'var(--ink)' : 'var(--ink-faint)' }}>
-                      {p.is_active ? 'Active' : 'Inactive'}
-                    </span>
-                  </span>
-                </td>
-                <td style={{ ...s.td, ...s.mono }}>{new Date(p.created_at).toLocaleDateString('en-GB')}</td>
-                <td style={{ ...s.td, textAlign: 'right' }}>
-                  <div style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-                    <select
-                      style={s.selectSm}
-                      value={p.role}
-                      disabled={saving === p.id}
-                      onChange={(e) => changeRole(p.id, e.target.value as UserRole)}
-                    >
-                      {ROLE_OPTIONS.map((r) => <option key={r} value={r}>{r}</option>)}
-                    </select>
-                    <button
-                      className="btn"
-                      style={p.is_active ? s.btnDanger : s.btnSecondary}
-                      disabled={saving === p.id}
-                      onClick={() => toggleActive(p.id, p.is_active)}
-                    >
-                      {saving === p.id ? '…' : p.is_active ? 'Deactivate' : 'Activate'}
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
+            {profiles.map((p, idx) => {
+              const userCompanies = accessMap[p.id] ?? [];
+              const isFinance = p.role === 'finance';
+              const isExpanded = expandedAccess === p.id;
+              return (
+                <>
+                  <tr key={p.id} style={{ ...s.row, ...(idx % 2 === 1 ? s.rowAlt : {}) }}>
+                    <td style={s.td}><div style={s.name}>{p.display_name}</div></td>
+                    <td style={{ ...s.td, ...s.mono }}>{p.email}</td>
+                    <td style={s.td}>
+                      <span style={{
+                        ...s.roleBadge,
+                        background: ROLE_TINTS[p.role].bg,
+                        color: ROLE_TINTS[p.role].color,
+                        border: `1px solid ${ROLE_TINTS[p.role].border}`,
+                      }}>
+                        {p.role}
+                      </span>
+                    </td>
+                    <td style={s.td}>
+                      {!isFinance ? (
+                        <span style={s.faint}>
+                          {p.role === 'admin' || p.role === 'auditor' ? 'All (by role)' : '—'}
+                        </span>
+                      ) : userCompanies.length === 0 ? (
+                        <button
+                          style={ua.accessChipAll}
+                          onClick={() => setExpandedAccess(isExpanded ? null : p.id)}
+                        >
+                          All schools ↓
+                        </button>
+                      ) : (
+                        <button
+                          style={ua.accessChipLimited}
+                          onClick={() => setExpandedAccess(isExpanded ? null : p.id)}
+                        >
+                          {userCompanies.length} school{userCompanies.length !== 1 ? 's' : ''} ↓
+                        </button>
+                      )}
+                    </td>
+                    <td style={s.td}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+                        <span style={{
+                          ...s.statusDot,
+                          background: p.is_active ? 'var(--success)' : 'var(--ink-faint)',
+                        }} />
+                        <span style={{ fontSize: 12, color: p.is_active ? 'var(--ink)' : 'var(--ink-faint)' }}>
+                          {p.is_active ? 'Active' : 'Inactive'}
+                        </span>
+                      </span>
+                    </td>
+                    <td style={{ ...s.td, textAlign: 'right' }}>
+                      <div style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                        <select
+                          style={s.selectSm}
+                          value={p.role}
+                          disabled={saving === p.id}
+                          onChange={(e) => changeRole(p.id, e.target.value as UserRole)}
+                        >
+                          {ROLE_OPTIONS.map((r) => <option key={r} value={r}>{r}</option>)}
+                        </select>
+                        <button
+                          className="btn"
+                          style={p.is_active ? s.btnDanger : s.btnSecondary}
+                          disabled={saving === p.id}
+                          onClick={() => toggleActive(p.id, p.is_active)}
+                        >
+                          {saving === p.id ? '…' : p.is_active ? 'Deactivate' : 'Activate'}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+
+                  {/* Inline company access editor */}
+                  {isExpanded && isFinance && (
+                    <tr key={`${p.id}-access`}>
+                      <td colSpan={6} style={{ padding: 0, borderBottom: '1px solid var(--line)' }}>
+                        <CompanyAccessEditor
+                          profileId={p.id}
+                          profileName={p.display_name}
+                          companies={companies}
+                          currentAccess={userCompanies}
+                          saving={accessSaving === p.id}
+                          onSave={(slugs) => saveCompanyAccess(p.id, slugs)}
+                          onCancel={() => setExpandedAccess(null)}
+                        />
+                      </td>
+                    </tr>
+                  )}
+                </>
+              );
+            })}
           </tbody>
         </table>
         {profiles.length === 0 && <div style={s.empty}>No users yet.</div>}
@@ -299,6 +390,194 @@ function UsersTab() {
     </div>
   );
 }
+
+// ─── Company Access Editor (inline, used inside Users tab) ────────────────────
+
+function CompanyAccessEditor({
+  profileId, profileName, companies, currentAccess, saving, onSave, onCancel,
+}: {
+  profileId: string;
+  profileName: string;
+  companies: { slug: string; name: string }[];
+  currentAccess: string[];
+  saving: boolean;
+  onSave: (slugs: string[]) => void;
+  onCancel: () => void;
+}) {
+  const [selected, setSelected] = useState<Set<string>>(new Set(currentAccess));
+
+  function toggle(slug: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(slug)) next.delete(slug);
+      else next.add(slug);
+      return next;
+    });
+  }
+
+  const noneSelected = selected.size === 0;
+
+  return (
+    <div style={ua.editorWrap}>
+      <div style={ua.editorHeader}>
+        <div>
+          <div style={ua.editorKicker}>§ Company access</div>
+          <div style={ua.editorTitle}>Schools for <strong>{profileName}</strong></div>
+          <div style={ua.editorSub}>
+            Tick the schools this user should see. Leave all unticked to give unrestricted access (all schools).
+          </div>
+        </div>
+      </div>
+
+      <div style={ua.checkGrid}>
+        {companies.map((c) => {
+          const checked = selected.has(c.slug);
+          return (
+            <label key={c.slug} style={{ ...ua.checkLabel, ...(checked ? ua.checkLabelActive : {}) }}>
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={() => toggle(c.slug)}
+                style={{ accentColor: 'var(--accent)', width: 15, height: 15, flexShrink: 0 }}
+              />
+              <span style={ua.checkName}>{c.name}</span>
+              <span style={ua.checkSlug}>{c.slug}</span>
+            </label>
+          );
+        })}
+      </div>
+
+      {noneSelected && (
+        <div style={ua.unrestrictedNote}>
+          ✓ No schools selected — this user will see <strong>all companies</strong> (unrestricted access).
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+        <button
+          className="btn"
+          style={s.btnPrimary}
+          disabled={saving}
+          onClick={() => onSave(Array.from(selected))}
+        >
+          {saving ? 'Saving…' : noneSelected ? 'Save (unrestricted) →' : `Save ${selected.size} school${selected.size !== 1 ? 's' : ''} →`}
+        </button>
+        <button className="btn" style={s.btnSecondary} onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Company access UI styles
+const ua: Record<string, React.CSSProperties> = {
+  accessChipAll: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 5,
+    padding: '3px 10px',
+    borderRadius: 999,
+    fontSize: 10.5,
+    fontWeight: 600,
+    textTransform: 'uppercase',
+    letterSpacing: '0.1em',
+    background: 'rgba(16,185,129,0.1)',
+    color: 'var(--success)',
+    border: '1px solid rgba(16,185,129,0.25)',
+    cursor: 'pointer',
+  },
+  accessChipLimited: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 5,
+    padding: '3px 10px',
+    borderRadius: 999,
+    fontSize: 10.5,
+    fontWeight: 600,
+    textTransform: 'uppercase',
+    letterSpacing: '0.1em',
+    background: 'var(--accent-soft)',
+    color: 'var(--accent-text)',
+    border: '1px solid rgba(0,198,224,0.25)',
+    cursor: 'pointer',
+  },
+  editorWrap: {
+    padding: '20px 24px',
+    background: 'var(--paper)',
+    borderTop: '2px solid var(--accent)',
+  },
+  editorHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 16,
+  },
+  editorKicker: {
+    fontFamily: 'var(--font-mono)',
+    fontSize: 10,
+    color: 'var(--accent)',
+    fontWeight: 600,
+    letterSpacing: '0.16em',
+    textTransform: 'uppercase',
+    marginBottom: 4,
+  },
+  editorTitle: {
+    fontFamily: 'var(--font-display)',
+    fontSize: 18,
+    fontWeight: 400,
+    color: 'var(--ink)',
+    letterSpacing: '-0.01em',
+    marginBottom: 4,
+  },
+  editorSub: {
+    fontSize: 12.5,
+    color: 'var(--ink-muted)',
+    lineHeight: 1.5,
+  },
+  checkGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+    gap: 10,
+    marginTop: 4,
+  },
+  checkLabel: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    padding: '10px 14px',
+    borderRadius: 8,
+    border: '1px solid var(--line-strong)',
+    cursor: 'pointer',
+    background: 'var(--paper-bright)',
+    transition: 'border-color 0.12s, background 0.12s',
+  },
+  checkLabelActive: {
+    borderColor: 'var(--accent)',
+    background: 'var(--accent-soft)',
+  },
+  checkName: {
+    fontSize: 13,
+    fontWeight: 500,
+    color: 'var(--ink)',
+    flex: 1,
+  },
+  checkSlug: {
+    fontFamily: 'var(--font-mono)',
+    fontSize: 9.5,
+    color: 'var(--ink-faint)',
+  },
+  unrestrictedNote: {
+    marginTop: 12,
+    padding: '10px 14px',
+    background: 'rgba(16,185,129,0.07)',
+    border: '1px dashed rgba(16,185,129,0.3)',
+    borderRadius: 7,
+    fontSize: 12.5,
+    color: 'var(--success)',
+    lineHeight: 1.5,
+  },
+};
 
 // ─── Approvers Tab ────────────────────────────────────────────────────────────
 

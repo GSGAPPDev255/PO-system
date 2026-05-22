@@ -58,21 +58,34 @@ export default function FinanceDashboard() {
     qc.invalidateQueries({ queryKey: ['invoices'] });
   };
 
-  // Load companies dynamically from DB
+  // Load companies and user's access list, then build the company filter tabs.
+  // If the user has access restrictions (finance role), only show permitted companies.
+  // Admin/auditor always see all companies.
   useEffect(() => {
-    supabase
-      .from('companies')
-      .select('name, slug')
-      .eq('is_active', true)
-      .order('name')
-      .then(({ data }) => {
-        if (data && data.length > 0) {
-          setCompanyFilters([
-            { label: 'All', value: 'all' },
-            ...data.map((c: { name: string; slug: string }) => ({ label: c.name, value: c.slug })),
-          ]);
-        }
-      });
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const [companiesRes, accessRes] = await Promise.all([
+        supabase.from('companies').select('name, slug').eq('is_active', true).order('name'),
+        supabase.from('profile_company_access').select('company').eq('profile_id', user.id),
+      ]);
+
+      const allCompanies = (companiesRes.data as { name: string; slug: string }[]) ?? [];
+      const accessSlugs = (accessRes.data as { company: string }[] ?? []).map(r => r.company);
+
+      // If user has no access rows → unrestricted; show all companies
+      const visibleCompanies = accessSlugs.length === 0
+        ? allCompanies
+        : allCompanies.filter(c => accessSlugs.includes(c.slug));
+
+      if (visibleCompanies.length > 0) {
+        setCompanyFilters([
+          { label: 'All', value: 'all' },
+          ...visibleCompanies.map(c => ({ label: c.name, value: c.slug })),
+        ]);
+      }
+    })();
   }, []);
 
   const { data: invoices = [], isLoading, error } = useInvoices(
