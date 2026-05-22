@@ -107,6 +107,7 @@ function UsersTab() {
   const [showInvite, setShowInvite]   = useState(false);
   const [inviting, setInviting]       = useState(false);
   const [inviteForm, setInviteForm]   = useState<InviteForm>(EMPTY_INVITE);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   function flash(m: string, type: 'success' | 'error' = 'success') {
     setMsg(m); setMsgType(type);
@@ -116,14 +117,16 @@ function UsersTab() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [profilesRes, companiesRes, accessRes] = await Promise.all([
+      const [profilesRes, companiesRes, accessRes, authRes] = await Promise.all([
         supabase.from('profiles').select('*').order('display_name'),
         supabase.from('companies').select('slug, name').eq('is_active', true).order('name'),
         supabase.from('profile_company_access').select('profile_id, company'),
+        supabase.auth.getUser(),
       ]);
       if (profilesRes.error) { setMsg('Could not load users: ' + profilesRes.error.message); setMsgType('error'); }
       setProfiles((profilesRes.data as Profile[]) ?? []);
       setCompanies((companiesRes.data as { slug: string; name: string }[]) ?? []);
+      setCurrentUserId(authRes.data.user?.id ?? null);
       // Build access map: profile_id → [company slugs]
       const map: Record<string, string[]> = {};
       for (const row of (accessRes.data as CompanyAccess[]) ?? []) {
@@ -141,6 +144,18 @@ function UsersTab() {
   useEffect(() => { load(); }, [load]);
 
   async function changeRole(id: string, role: UserRole) {
+    // Block self-role changes
+    if (id === currentUserId) {
+      flash('You cannot change your own role. Ask another admin to do this.', 'error');
+      return;
+    }
+    // Block demoting the last admin
+    const adminCount = profiles.filter((p) => p.role === 'admin').length;
+    const target = profiles.find((p) => p.id === id);
+    if (target?.role === 'admin' && role !== 'admin' && adminCount <= 1) {
+      flash('Cannot demote the last admin — assign another admin first.', 'error');
+      return;
+    }
     setSaving(id);
     const { error } = await supabase.from('profiles').update({ role, updated_at: new Date().toISOString() }).eq('id', id);
     if (error) flash('Error: ' + error.message, 'error');
@@ -295,10 +310,18 @@ function UsersTab() {
               const userCompanies = accessMap[p.id] ?? [];
               const isFinance = p.role === 'finance';
               const isExpanded = expandedAccess === p.id;
+              const isSelf = p.id === currentUserId;
               return (
                 <>
                   <tr key={p.id} style={{ ...s.row, ...(idx % 2 === 1 ? s.rowAlt : {}) }}>
-                    <td style={s.td}><div style={s.name}>{p.display_name}</div></td>
+                    <td style={s.td}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div style={s.name}>{p.display_name}</div>
+                        {isSelf && (
+                          <span style={gu.youBadge}>You</span>
+                        )}
+                      </div>
+                    </td>
                     <td style={{ ...s.td, ...s.mono }}>{p.email}</td>
                     <td style={s.td}>
                       <span style={{
@@ -343,24 +366,28 @@ function UsersTab() {
                       </span>
                     </td>
                     <td style={{ ...s.td, textAlign: 'right' }}>
-                      <div style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-                        <select
-                          style={s.selectSm}
-                          value={p.role}
-                          disabled={saving === p.id}
-                          onChange={(e) => changeRole(p.id, e.target.value as UserRole)}
-                        >
-                          {ROLE_OPTIONS.map((r) => <option key={r} value={r}>{r}</option>)}
-                        </select>
-                        <button
-                          className="btn"
-                          style={p.is_active ? s.btnDanger : s.btnSecondary}
-                          disabled={saving === p.id}
-                          onClick={() => toggleActive(p.id, p.is_active)}
-                        >
-                          {saving === p.id ? '…' : p.is_active ? 'Deactivate' : 'Activate'}
-                        </button>
-                      </div>
+                      {isSelf ? (
+                        <span style={gu.selfLockNote}>Your account — protected</span>
+                      ) : (
+                        <div style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                          <select
+                            style={s.selectSm}
+                            value={p.role}
+                            disabled={saving === p.id}
+                            onChange={(e) => changeRole(p.id, e.target.value as UserRole)}
+                          >
+                            {ROLE_OPTIONS.map((r) => <option key={r} value={r}>{r}</option>)}
+                          </select>
+                          <button
+                            className="btn"
+                            style={p.is_active ? s.btnDanger : s.btnSecondary}
+                            disabled={saving === p.id}
+                            onClick={() => toggleActive(p.id, p.is_active)}
+                          >
+                            {saving === p.id ? '…' : p.is_active ? 'Deactivate' : 'Activate'}
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
 
@@ -2037,5 +2064,30 @@ const sy: Record<string, React.CSSProperties> = {
     lineHeight: 1.6,
     maxHeight: 240,
     overflowY: 'auto',
+  },
+};
+
+// ─── Guard UI styles (self-lock protection) ───────────────────────────────────
+
+const gu: Record<string, React.CSSProperties> = {
+  youBadge: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    padding: '2px 8px',
+    borderRadius: 999,
+    fontSize: 9.5,
+    fontWeight: 700,
+    letterSpacing: '0.14em',
+    textTransform: 'uppercase',
+    background: 'var(--accent-soft)',
+    color: 'var(--accent-text)',
+    border: '1px solid rgba(0,198,224,0.3)',
+    flexShrink: 0,
+  },
+  selfLockNote: {
+    fontSize: 11,
+    color: 'var(--ink-faint)',
+    fontStyle: 'italic',
+    fontFamily: 'var(--font-display)',
   },
 };
