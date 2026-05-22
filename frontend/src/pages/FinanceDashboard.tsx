@@ -40,8 +40,91 @@ export default function FinanceDashboard() {
   const [companyFilters, setCompanyFilters] = useState<{ label: string; value: string }[]>([
     { label: 'All', value: 'all' },
   ]);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkWorking, setBulkWorking] = useState(false);
   const navigate = useNavigate();
   const qc = useQueryClient();
+
+  // ── Selection helpers ────────────────────────────────────────────────────────
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const clearSelection = () => setSelectedIds(new Set());
+
+  // ── Bulk actions ─────────────────────────────────────────────────────────────
+  const bulkSendApproval = async () => {
+    const targets = filtered.filter(i => selectedIds.has(i.id) && i.status === 'pending_approval');
+    if (targets.length === 0) return;
+    if (!confirm(`Send approval emails for ${targets.length} invoice${targets.length === 1 ? '' : 's'}?`)) return;
+    setBulkWorking(true);
+    const errors: string[] = [];
+    for (const inv of targets) {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const res = await supabase.functions.invoke('send-approval', {
+          body: { purchase_order_id: inv.id },
+          headers: session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {},
+        });
+        if (res.error) throw new Error(res.error.message);
+      } catch (err) {
+        errors.push(`${inv.supplier_name ?? inv.id}: ${(err as Error).message}`);
+      }
+    }
+    setBulkWorking(false);
+    clearSelection();
+    qc.invalidateQueries({ queryKey: ['invoices'] });
+    if (errors.length) alert(`Completed with errors:\n${errors.join('\n')}`);
+  };
+
+  const bulkMarkReadyExport = async () => {
+    const targets = filtered.filter(i => selectedIds.has(i.id) && i.status === 'approved');
+    if (targets.length === 0) return;
+    if (!confirm(`Mark ${targets.length} invoice${targets.length === 1 ? '' : 's'} as Ready to Export?`)) return;
+    setBulkWorking(true);
+    const { data: { user } } = await supabase.auth.getUser();
+    for (const inv of targets) {
+      await supabase.from('purchase_orders').update({ status: 'approved_ready_export' }).eq('id', inv.id);
+      await supabase.from('audit_log').insert({
+        purchase_order_id: inv.id,
+        action: 'status_changed',
+        actor_id: user?.id,
+        actor_email: user?.email,
+        actor_display: 'Finance (bulk)',
+        new_values: { status: 'approved_ready_export' },
+        metadata: { reason: 'Bulk mark ready to export' },
+      });
+    }
+    setBulkWorking(false);
+    clearSelection();
+    qc.invalidateQueries({ queryKey: ['invoices'] });
+  };
+
+  const bulkDismiss = async () => {
+    const targets = filtered.filter(i => selectedIds.has(i.id) && i.status !== 'dismissed');
+    if (targets.length === 0) return;
+    if (!confirm(`Dismiss ${targets.length} invoice${targets.length === 1 ? '' : 's'}? They will be hidden from the main view.`)) return;
+    setBulkWorking(true);
+    const { data: { user } } = await supabase.auth.getUser();
+    for (const inv of targets) {
+      await supabase.from('purchase_orders').update({ status: 'dismissed' }).eq('id', inv.id);
+      await supabase.from('audit_log').insert({
+        purchase_order_id: inv.id,
+        action: 'status_changed',
+        actor_id: user?.id,
+        actor_email: user?.email,
+        actor_display: 'Finance (bulk dismiss)',
+        new_values: { status: 'dismissed' },
+        metadata: { reason: 'Bulk dismissed from dashboard' },
+      });
+    }
+    setBulkWorking(false);
+    clearSelection();
+    qc.invalidateQueries({ queryKey: ['invoices'] });
+  };
 
   const handleDismiss = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
@@ -88,6 +171,9 @@ export default function FinanceDashboard() {
     })();
   }, []);
 
+  // Clear selection whenever the visible set changes
+  useEffect(() => { clearSelection(); }, [statusFilter, companyFilter, search]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const { data: invoices = [], isLoading, error } = useInvoices(
     statusFilter === 'all' ? undefined : statusFilter,
   );
@@ -109,6 +195,14 @@ export default function FinanceDashboard() {
       (i.account_number ?? '').toLowerCase().includes(q),
     );
   }, [invoices, search, companyFilter]);
+
+  const allSelected = filtered.length > 0 && filtered.every(i => selectedIds.has(i.id));
+  const someSelected = selectedIds.size > 0;
+
+  // Which bulk actions are applicable to the current selection
+  const canSendApproval = filtered.some(i => selectedIds.has(i.id) && i.status === 'pending_approval');
+  const canMarkExport   = filtered.some(i => selectedIds.has(i.id) && i.status === 'approved');
+  const canDismiss      = filtered.some(i => selectedIds.has(i.id) && i.status !== 'dismissed');
 
   const totals = useMemo(() => {
     let gross = 0;
@@ -231,6 +325,55 @@ export default function FinanceDashboard() {
         </div>
       </div>
 
+      {/* Bulk action bar */}
+      {someSelected && (
+        <div style={styles.bulkBar}>
+          <div style={styles.bulkCount}>
+            <svg width="14" height="14" viewBox="0 0 16 16" style={{ flexShrink: 0 }}>
+              <rect x="2" y="2" width="12" height="12" rx="2.5" fill="none" stroke="var(--accent)" strokeWidth="1.5"/>
+              <polyline points="5,8.5 7,10.5 11,6" fill="none" stroke="var(--accent)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            <strong style={{ color: 'var(--ink)' }}>{selectedIds.size}</strong>
+            <span style={{ color: 'var(--ink-muted)' }}>selected</span>
+          </div>
+          <div style={styles.bulkActions}>
+            {canSendApproval && (
+              <button
+                style={{ ...styles.bulkBtn, ...styles.bulkBtnPrimary }}
+                onClick={bulkSendApproval}
+                disabled={bulkWorking}
+              >
+                {bulkWorking ? '…' : '✉ Send Approval Emails'}
+              </button>
+            )}
+            {canMarkExport && (
+              <button
+                style={{ ...styles.bulkBtn, ...styles.bulkBtnSuccess }}
+                onClick={bulkMarkReadyExport}
+                disabled={bulkWorking}
+              >
+                {bulkWorking ? '…' : '✓ Mark Ready to Export'}
+              </button>
+            )}
+            {canDismiss && (
+              <button
+                style={{ ...styles.bulkBtn, ...styles.bulkBtnDanger }}
+                onClick={bulkDismiss}
+                disabled={bulkWorking}
+              >
+                {bulkWorking ? '…' : '✕ Dismiss'}
+              </button>
+            )}
+            <button
+              style={{ ...styles.bulkBtn, color: 'var(--ink-muted)' }}
+              onClick={clearSelection}
+            >
+              Clear selection
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Table */}
       {isLoading ? (
         <div style={styles.empty}>
@@ -246,6 +389,15 @@ export default function FinanceDashboard() {
             <table style={styles.table}>
               <thead>
                 <tr>
+                  <th style={{ ...styles.th, width: 44, padding: '14px 0 14px 18px' }}>
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      onChange={() => allSelected ? clearSelection() : setSelectedIds(new Set(filtered.map(i => i.id)))}
+                      style={styles.checkbox}
+                      title={allSelected ? 'Deselect all' : 'Select all'}
+                    />
+                  </th>
                   <th style={styles.th}>Supplier</th>
                   <th style={styles.th}>School</th>
                   <th style={styles.th}>Invoice Ref</th>
@@ -264,11 +416,27 @@ export default function FinanceDashboard() {
                   return (
                     <tr
                       key={inv.id}
-                      style={{ ...styles.row, ...(zebra ? styles.rowZebra : {}) }}
+                      style={{
+                        ...styles.row,
+                        ...(zebra ? styles.rowZebra : {}),
+                        ...(selectedIds.has(inv.id) ? styles.rowSelected : {}),
+                      }}
                       onClick={() => navigate(`/invoices/${inv.id}`)}
-                      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--accent-soft)'; }}
-                      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = zebra ? 'rgba(228,221,203,0.25)' : 'transparent'; }}
+                      onMouseEnter={(e) => { if (!selectedIds.has(inv.id)) (e.currentTarget as HTMLElement).style.background = 'var(--accent-soft)'; }}
+                      onMouseLeave={(e) => {
+                        if (!selectedIds.has(inv.id))
+                          (e.currentTarget as HTMLElement).style.background = zebra ? 'rgba(228,221,203,0.25)' : 'transparent';
+                      }}
                     >
+                      <td style={{ ...styles.td, width: 44, padding: '14px 0 14px 18px' }} onClick={e => { e.stopPropagation(); toggleSelect(inv.id); }}>
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(inv.id)}
+                          onChange={() => toggleSelect(inv.id)}
+                          style={styles.checkbox}
+                          onClick={e => e.stopPropagation()}
+                        />
+                      </td>
                       <td style={styles.td}>
                         <div style={styles.supplierName}>{inv.supplier_name ?? '—'}</div>
                         {inv.account_number && <div style={styles.accountNum}>{inv.account_number}</div>}
@@ -657,6 +825,69 @@ const styles: Record<string, React.CSSProperties> = {
     animation: 'spin 0.8s linear infinite',
     marginBottom: 6,
   },
+  checkbox: {
+    width: 15,
+    height: 15,
+    cursor: 'pointer',
+    accentColor: 'var(--accent)',
+    flexShrink: 0,
+  },
+  rowSelected: {
+    background: 'rgba(0, 180, 216, 0.08)',
+  },
+
+  bulkBar: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    padding: '10px 16px',
+    marginBottom: 12,
+    background: 'var(--paper-bright)',
+    border: '1.5px solid var(--accent)',
+    borderRadius: 10,
+    flexWrap: 'wrap' as const,
+  },
+  bulkCount: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 7,
+    fontSize: 13,
+  },
+  bulkActions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap' as const,
+  },
+  bulkBtn: {
+    padding: '6px 14px',
+    fontSize: 12,
+    fontWeight: 500,
+    border: '1px solid var(--line-strong)',
+    background: 'transparent',
+    color: 'var(--ink-soft)',
+    borderRadius: 6,
+    cursor: 'pointer',
+    letterSpacing: '0.01em',
+    transition: 'all 0.12s',
+  },
+  bulkBtnPrimary: {
+    background: 'var(--ink)',
+    color: 'var(--paper)',
+    borderColor: 'var(--ink)',
+  },
+  bulkBtnSuccess: {
+    background: 'rgba(6,214,160,0.12)',
+    color: '#06d6a0',
+    borderColor: 'rgba(6,214,160,0.3)',
+  },
+  bulkBtnDanger: {
+    background: 'rgba(160,49,53,0.07)',
+    color: 'var(--danger)',
+    borderColor: 'rgba(160,49,53,0.22)',
+  },
+
   errorBanner: {
     display: 'flex',
     alignItems: 'baseline',

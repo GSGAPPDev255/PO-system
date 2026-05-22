@@ -1474,6 +1474,7 @@ interface FnStatus { name: string; label: string; schedule: string }
 const FUNCTIONS: FnStatus[] = [
   { name: 'email-intake',       label: 'Email intake',        schedule: 'Every 5 minutes' },
   { name: 'reminder-scheduler', label: 'Reminder scheduler',  schedule: 'Daily · 08:00 UTC' },
+  { name: 'finance-digest',     label: 'Finance digest',      schedule: 'Daily · 08:30 UTC' },
   { name: 'sync-approvers',     label: 'Sync approvers',      schedule: 'Daily · 09:00 UTC' },
   { name: 'gemini-processor',   label: 'Gemini processor',    schedule: 'On-demand' },
   { name: 'send-approval',      label: 'Send approval',       schedule: 'On-demand' },
@@ -1487,6 +1488,7 @@ function SystemTab() {
   const [results, setResults]         = useState<Record<string, string>>({});
   const [stats, setStats]             = useState<{ pos: number; files: number; exports: number; pending: number } | null>(null);
   const [sendingReminders, setSendingReminders] = useState(false);
+  const [sendingDigest, setSendingDigest]       = useState(false);
   const [intakeStatus, setIntakeStatus] = useState<'idle' | 'checking' | 'ok' | 'error'>('idle');
   const [intakeDetail, setIntakeDetail] = useState('');
 
@@ -1561,20 +1563,47 @@ function SystemTab() {
     setSendingReminders(false);
   }
 
+  async function sendManualDigest() {
+    setSendingDigest(true);
+    setResults((r) => ({ ...r, 'manual-digest': 'Sending…' }));
+    try {
+      const { data, error } = await supabase.functions.invoke('finance-digest', { method: 'POST' });
+      if (error) {
+        setResults((r) => ({ ...r, 'manual-digest': 'Error: ' + error.message }));
+      } else {
+        const d = data as { sent?: number; failed?: number } | null;
+        setResults((r) => ({ ...r, 'manual-digest': `Sent to ${d?.sent ?? 0} recipient${d?.sent !== 1 ? 's' : ''}.${d?.failed ? ` ${d.failed} failed.` : ''}` }));
+      }
+    } catch (e) {
+      setResults((r) => ({ ...r, 'manual-digest': 'Failed: ' + (e as Error).message }));
+    }
+    setSendingDigest(false);
+  }
+
   return (
     <div>
       <SectionHeader
         title="System health & controls"
         subtitle="Database stats and manual function triggers. Use these to test or recover from issues."
         actions={
-          <button
-            className="btn"
-            style={s.btnPrimary}
-            disabled={sendingReminders}
-            onClick={sendManualReminders}
-          >
-            {sendingReminders ? 'Sending…' : '📧 Send reminders now'}
-          </button>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button
+              className="btn"
+              style={s.btnSecondary}
+              disabled={sendingDigest}
+              onClick={sendManualDigest}
+            >
+              {sendingDigest ? 'Sending…' : '📋 Send digest now'}
+            </button>
+            <button
+              className="btn"
+              style={s.btnPrimary}
+              disabled={sendingReminders}
+              onClick={sendManualReminders}
+            >
+              {sendingReminders ? 'Sending…' : '📧 Send reminders now'}
+            </button>
+          </div>
         }
       />
 
@@ -1632,6 +1661,13 @@ function SystemTab() {
         )}
       </div>
 
+      {results['manual-digest'] && (
+        <div style={{ ...s.card, marginBottom: 12, backgroundColor: 'var(--paper-bright)', borderLeft: '3px solid var(--accent-3)' }}>
+          <div style={{ padding: 16, fontFamily: 'var(--font-mono)', fontSize: 12, color: results['manual-digest'].startsWith('Error') || results['manual-digest'].startsWith('Failed') ? 'var(--danger)' : 'var(--success)' }}>
+            📋 Digest: {results['manual-digest']}
+          </div>
+        </div>
+      )}
       {results['manual-reminders'] && (
         <div style={{ ...s.card, marginBottom: 20, backgroundColor: 'var(--paper-bright)', borderLeft: '3px solid var(--accent)' }}>
           <div style={{ padding: 16, fontFamily: 'var(--font-mono)', fontSize: 12, color: results['manual-reminders'].startsWith('Error') || results['manual-reminders'].startsWith('Failed') ? 'var(--danger)' : 'var(--success)' }}>

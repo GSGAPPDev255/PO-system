@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { useInvoice, useOcrExtraction } from '../hooks/useInvoices';
@@ -5,11 +6,43 @@ import { useAuditLog } from '../hooks/useApprovals';
 import AuditTimeline from '../components/shared/AuditTimeline';
 import StatusBadge from '../components/shared/StatusBadge';
 import OcrComparisonPanel from '../components/invoice/OcrComparisonPanel';
-import type { PurchaseOrder } from '../lib/supabase';
+import type { PurchaseOrder, AuditLogEntry } from '../lib/supabase';
+
+function escCsv(v: unknown): string {
+  if (v == null) return '';
+  const s = typeof v === 'object' ? JSON.stringify(v) : String(v);
+  if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+}
+
+function downloadAuditCsv(entries: AuditLogEntry[], supplierName: string, ref: string) {
+  const header = ['Timestamp', 'Action', 'Actor', 'Actor Email', 'New Values', 'Old Values', 'Metadata'];
+  const rows = entries.map(e => [
+    format(new Date(e.created_at), 'dd/MM/yyyy HH:mm:ss'),
+    e.action,
+    e.actor_display ?? '',
+    e.actor_email ?? '',
+    escCsv(e.new_values),
+    escCsv(e.old_values),
+    escCsv(e.metadata),
+  ]);
+  const csv = [header, ...rows].map(r => r.map(escCsv).join(',')).join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const safeName = (supplierName || 'invoice').replace(/[^a-z0-9]/gi, '_').toLowerCase();
+  a.href = url;
+  a.download = `audit_${safeName}_${ref || 'unknown'}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 export default function AuditTrailViewer() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [exporting, setExporting] = useState(false);
 
   const { data: po, isLoading } = useInvoice(id!);
   const { data: auditLog = [] } = useAuditLog(id!);
@@ -93,6 +126,21 @@ export default function AuditTrailViewer() {
               <span style={styles.panelCount}>
                 {auditLog.length} {auditLog.length === 1 ? 'event' : 'events'}
               </span>
+              <button
+                style={styles.exportBtn}
+                disabled={exporting || auditLog.length === 0}
+                onClick={() => {
+                  setExporting(true);
+                  try {
+                    downloadAuditCsv(auditLog, poData.supplier_name ?? '', poData.transaction_reference ?? id ?? '');
+                  } finally {
+                    setExporting(false);
+                  }
+                }}
+                title="Download audit trail as CSV"
+              >
+                {exporting ? '…' : '↓ Export CSV'}
+              </button>
             </div>
             <AuditTimeline entries={auditLog} />
           </div>
@@ -343,6 +391,20 @@ const styles: Record<string, React.CSSProperties> = {
     textTransform: 'uppercase',
     letterSpacing: '0.14em',
     fontWeight: 500,
+  },
+  exportBtn: {
+    padding: '5px 12px',
+    fontSize: 11,
+    fontWeight: 600,
+    letterSpacing: '0.05em',
+    border: '1px solid var(--line-strong)',
+    background: 'var(--paper)',
+    color: 'var(--ink-soft)',
+    borderRadius: 6,
+    cursor: 'pointer',
+    marginLeft: 'auto',
+    textTransform: 'uppercase',
+    transition: 'all 0.12s',
   },
   ocrMeta: {
     display: 'flex',

@@ -10,6 +10,7 @@ import ApproverView from './pages/ApproverView';
 import ExportManagement from './pages/ExportManagement';
 import AuditTrailViewer from './pages/AuditTrailViewer';
 import AdminPanel from './pages/AdminPanel';
+import SpendingDashboard from './pages/SpendingDashboard';
 
 const PROFILE_CACHE_KEY = 'posystem_profile_cache';
 
@@ -175,6 +176,7 @@ export default function App() {
                 <Route path="/dashboard" element={<FinanceDashboard />} />
                 <Route path="/invoices/:id" element={<InvoiceReview />} />
                 <Route path="/export" element={<ExportManagement />} />
+                <Route path="/spend" element={<SpendingDashboard />} />
                 <Route path="/audit/:id" element={<AuditTrailViewer />} />
                 <Route
                   path="/admin"

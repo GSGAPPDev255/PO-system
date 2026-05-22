@@ -47,6 +47,7 @@ export default function InvoiceReview() {
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [extracting, setExtracting] = useState(false);
   const [extractError, setExtractError] = useState<string | null>(null);
+  const [resubmitting, setResubmitting] = useState(false);
 
   useEffect(() => {
     if (po) {
@@ -232,6 +233,49 @@ export default function InvoiceReview() {
     }
   };
 
+  const handleResubmit = async () => {
+    const validationErrors = validateReadyForApproval();
+    if (validationErrors.length > 0) {
+      setSaveError(validationErrors);
+      return;
+    }
+    if (!confirm('Save changes and resubmit this invoice for approval? A new approval email will be sent to the approver.')) return;
+    setResubmitting(true);
+    setSaveError(null);
+    try {
+      // Save latest form changes first
+      await handleSave();
+      // Set status back to pending_approval
+      const { data: { user } } = await supabase.auth.getUser();
+      await supabase
+        .from('purchase_orders')
+        .update({ status: 'pending_approval', updated_by_id: user?.id })
+        .eq('id', id!);
+      await supabase.from('audit_log').insert({
+        purchase_order_id: id,
+        action: 'status_changed',
+        actor_id: user?.id,
+        actor_email: user?.email,
+        actor_display: 'Finance',
+        new_values: { status: 'pending_approval' },
+        metadata: { reason: 'Resubmitted after rejection — corrections applied' },
+      });
+      // Resend the approval email
+      const { data: { session } } = await supabase.auth.getSession();
+      const { error: fnError } = await supabase.functions.invoke('send-approval', {
+        body: { purchase_order_id: id },
+        headers: session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {},
+      });
+      if (fnError) throw new Error(`Approval email failed: ${fnError.message}`);
+      qc.invalidateQueries({ queryKey: ['invoices'] });
+      qc.invalidateQueries({ queryKey: ['invoice', id] });
+    } catch (e) {
+      setSaveError([(e as Error).message]);
+    } finally {
+      setResubmitting(false);
+    }
+  };
+
   const handleDismiss = async () => {
     setShowDismissConfirm(false);
     setDismissing(true);
@@ -302,30 +346,53 @@ export default function InvoiceReview() {
                 >
                   {saving ? 'Saving…' : 'Save Draft'}
                 </button>
-                <div style={styles.approvalBtnWrap}>
-                  <button
-                    className="btn"
-                    style={{
-                      ...styles.approvalBtn,
-                      ...(form.assigned_approver_id ? {} : styles.approvalBtnDisabled),
-                    }}
-                    onClick={() => setShowConfirm(true)}
-                    disabled={!form.assigned_approver_id}
-                    title={
-                      form.assigned_approver_id
-                        ? 'Send approval email to the assigned approver'
-                        : 'Assign a Primary Approver below to enable this button'
-                    }
-                  >
-                    Send for Approval
-                    <span style={styles.approvalArrow}>→</span>
-                  </button>
-                  {!form.assigned_approver_id && (
-                    <span style={styles.approvalHint}>
-                      Assign a primary approver below
-                    </span>
-                  )}
-                </div>
+                {poData.status === 'rejected' ? (
+                  <div style={styles.approvalBtnWrap}>
+                    <button
+                      className="btn"
+                      style={{
+                        ...styles.approvalBtn,
+                        background: 'linear-gradient(135deg, #7b61ff 0%, #00b4d8 100%)',
+                        borderColor: '#7b61ff',
+                        ...(form.assigned_approver_id ? {} : styles.approvalBtnDisabled),
+                      }}
+                      onClick={handleResubmit}
+                      disabled={resubmitting || !form.assigned_approver_id}
+                      title="Apply corrections and resend for approval"
+                    >
+                      {resubmitting ? 'Resubmitting…' : '↺ Fix & Resubmit'}
+                      {!resubmitting && <span style={styles.approvalArrow}>→</span>}
+                    </button>
+                    {!form.assigned_approver_id && (
+                      <span style={styles.approvalHint}>Assign an approver below</span>
+                    )}
+                  </div>
+                ) : (
+                  <div style={styles.approvalBtnWrap}>
+                    <button
+                      className="btn"
+                      style={{
+                        ...styles.approvalBtn,
+                        ...(form.assigned_approver_id ? {} : styles.approvalBtnDisabled),
+                      }}
+                      onClick={() => setShowConfirm(true)}
+                      disabled={!form.assigned_approver_id}
+                      title={
+                        form.assigned_approver_id
+                          ? 'Send approval email to the assigned approver'
+                          : 'Assign a Primary Approver below to enable this button'
+                      }
+                    >
+                      Send for Approval
+                      <span style={styles.approvalArrow}>→</span>
+                    </button>
+                    {!form.assigned_approver_id && (
+                      <span style={styles.approvalHint}>
+                        Assign a primary approver below
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -361,6 +428,21 @@ export default function InvoiceReview() {
         <span style={styles.bannerLabelSuccess}>Saved</span>
         Your changes are safe.
       </div>}
+
+      {poData.status === 'rejected' && (
+        <div style={styles.rejectedBanner}>
+          <div style={styles.rejectedHeader}>
+            <span style={styles.rejectedLabel}>✕ Invoice Rejected</span>
+            <span style={styles.rejectedHint}>Correct the details below, then use "Fix &amp; Resubmit" to send for approval again.</span>
+          </div>
+          {!!(poData as unknown as Record<string, unknown>).rejected_reason && (
+            <div style={styles.rejectedReason}>
+              <span style={{ fontWeight: 600, marginRight: 6 }}>Reason:</span>
+              {String((poData as unknown as Record<string, unknown>).rejected_reason)}
+            </div>
+          )}
+        </div>
+      )}
 
       <div style={styles.layout} className="split-layout">
         {/* Left: PDF viewer */}
@@ -873,6 +955,41 @@ const styles: Record<string, React.CSSProperties> = {
     letterSpacing: '0.18em',
     textTransform: 'uppercase',
     flexShrink: 0,
+  },
+  rejectedBanner: {
+    background: 'rgba(160,49,53,0.06)',
+    border: '1.5px solid rgba(160,49,53,0.3)',
+    borderRadius: 10,
+    padding: '14px 18px',
+    marginBottom: 16,
+  },
+  rejectedHeader: {
+    display: 'flex',
+    alignItems: 'baseline',
+    gap: 14,
+    flexWrap: 'wrap' as const,
+  },
+  rejectedLabel: {
+    fontWeight: 700,
+    fontSize: 11,
+    letterSpacing: '0.14em',
+    textTransform: 'uppercase' as const,
+    color: 'var(--danger)',
+    flexShrink: 0,
+  },
+  rejectedHint: {
+    fontSize: 13,
+    color: 'var(--ink-muted)',
+  },
+  rejectedReason: {
+    marginTop: 10,
+    fontSize: 13,
+    color: 'var(--ink-soft)',
+    background: 'rgba(160,49,53,0.04)',
+    border: '1px solid rgba(160,49,53,0.15)',
+    borderRadius: 6,
+    padding: '8px 12px',
+    lineHeight: 1.5,
   },
   loading: {
     padding: 80,

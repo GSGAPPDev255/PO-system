@@ -33,7 +33,7 @@ export type UserRole = 'finance' | 'approver' | 'auditor' | 'admin' | 'staff';
 export type AuditAction =
   | 'created' | 'ocr_completed' | 'finance_edited' | 'status_changed'
   | 'approval_sent' | 'approved' | 'rejected' | 'forwarded'
-  | 'reminder_sent' | 'csv_generated' | 'exported';
+  | 'reminder_sent' | 'csv_generated' | 'exported' | 'digest_sent';
 
 export interface Profile {
   id: string;
