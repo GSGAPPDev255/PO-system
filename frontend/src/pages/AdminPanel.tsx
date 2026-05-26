@@ -6,7 +6,7 @@
  *  4. System     — view function health, trigger email-intake manually
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import type { Profile, UserRole } from '../lib/supabase';
 
