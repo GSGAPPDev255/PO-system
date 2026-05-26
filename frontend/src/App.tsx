@@ -125,6 +125,7 @@ export default function App() {
     return (
       <div style={styles.center}>
         <div style={styles.spinner} />
+        <span style={styles.spinnerLabel}>Loading</span>
       </div>
     );
   }
@@ -135,7 +136,12 @@ export default function App() {
       <Route path="/auth/callback" element={
         profile
           ? <Navigate to="/dashboard" replace />
-          : <div style={styles.center}><div style={styles.spinner} /></div>
+          : (
+            <div style={styles.center}>
+              <div style={styles.spinner} />
+              <span style={styles.spinnerLabel}>Signing in</span>
+            </div>
+          )
       } />
 
       {/* Public login */}
@@ -237,15 +243,31 @@ export default function App() {
 
 const styles: Record<string, React.CSSProperties> = {
   center: {
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    height: '100vh', background: '#f0f2f5',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 24,
+    height: '100vh',
+    background: '#080e1c',
+    position: 'relative',
+    overflow: 'hidden',
   },
   spinner: {
-    width: 40, height: 40,
-    border: '4px solid #e0e0e0',
-    borderTop: '4px solid #1e3a5f',
+    width: 52, height: 52,
+    border: '2.5px solid rgba(0,180,216,0.15)',
+    borderTopColor: '#00b4d8',
+    borderRightColor: 'rgba(6,214,160,0.45)',
     borderRadius: '50%',
-    animation: 'spin 0.8s linear infinite',
+    animation: 'spin 0.9s linear infinite',
+  },
+  spinnerLabel: {
+    fontFamily: '"DM Sans", system-ui, sans-serif',
+    fontSize: 12,
+    fontWeight: 600,
+    color: 'rgba(240,244,255,0.35)',
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.2em',
   },
 };
 // Build trigger

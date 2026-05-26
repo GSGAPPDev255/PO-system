@@ -18,6 +18,30 @@ export default function Login() {
 
   return (
     <div style={styles.page}>
+
+      {/* ── Full-page redirect overlay ─────────────────────────────────────── */}
+      {loading && (
+        <div style={styles.redirectOverlay}>
+          <div style={styles.redirectCard}>
+            {/* Prism top border */}
+            <div style={styles.redirectPrismBorder} aria-hidden />
+            <div style={styles.redirectInner}>
+              {/* Branded spinner ring with logo centred inside */}
+              <div style={styles.redirectSpinWrap}>
+                <div style={styles.redirectRing} />
+                <div style={styles.redirectRingInner}>
+                  <SotaraInfinityMark size={32} />
+                </div>
+              </div>
+              <div style={styles.redirectTitle}>Redirecting to Microsoft</div>
+              <div style={styles.redirectSub}>
+                Connecting to your Microsoft 365 account…
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Ambient background orbs */}
       <div style={styles.orb1} aria-hidden />
       <div style={styles.orb2} aria-hidden />
@@ -687,5 +711,78 @@ const styles: Record<string, React.CSSProperties> = {
     color: 'rgba(0,198,224,0.6)',
     fontStyle: 'italic',
     fontFamily: 'var(--font-display)',
+  },
+
+  /* ── Redirect overlay ────────────────────────────────────────────────────── */
+  redirectOverlay: {
+    position: 'fixed',
+    inset: 0,
+    zIndex: 999,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: 'rgba(5,10,24,0.82)',
+    backdropFilter: 'blur(18px) saturate(1.4)',
+    WebkitBackdropFilter: 'blur(18px) saturate(1.4)',
+  },
+  redirectCard: {
+    position: 'relative',
+    background: 'rgba(255,255,255,0.07)',
+    border: '1px solid rgba(255,255,255,0.13)',
+    borderRadius: 20,
+    boxShadow: '0 8px 40px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.08)',
+    overflow: 'hidden',
+    minWidth: 300,
+  },
+  redirectPrismBorder: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0,
+    height: 2,
+    background: 'linear-gradient(90deg, transparent 0%, #00B4D8 30%, #06D6A0 65%, #7B61FF 85%, transparent 100%)',
+    opacity: 0.9,
+  },
+  redirectInner: {
+    padding: '40px 48px',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: 20,
+  },
+  redirectSpinWrap: {
+    position: 'relative',
+    width: 72,
+    height: 72,
+    flexShrink: 0,
+  },
+  redirectRing: {
+    position: 'absolute',
+    inset: 0,
+    border: '2.5px solid rgba(0,180,216,0.18)',
+    borderTopColor: '#00B4D8',
+    borderRightColor: 'rgba(6,214,160,0.55)',
+    borderRadius: '50%',
+    animation: 'spin 0.9s linear infinite',
+  },
+  redirectRingInner: {
+    position: 'absolute',
+    inset: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  redirectTitle: {
+    fontFamily: 'var(--font-display)',
+    fontSize: 17,
+    fontWeight: 600,
+    color: 'var(--ink)',
+    letterSpacing: '-0.01em',
+    textAlign: 'center',
+  },
+  redirectSub: {
+    fontSize: 12,
+    color: 'var(--ink-muted)',
+    textAlign: 'center',
+    lineHeight: 1.55,
+    letterSpacing: '0.01em',
   },
 };
