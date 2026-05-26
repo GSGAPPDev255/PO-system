@@ -765,6 +765,10 @@ function ApproversTab() {
   const [toggling, setToggling]           = useState<string | null>(null);
   const [msg, setMsg]                     = useState('');
   const [msgType, setMsgType]             = useState<'success' | 'error'>('success');
+  // GAL search
+  const [galQuery, setGalQuery]           = useState('');
+  const [galResults, setGalResults]       = useState<GalUser[]>([]);
+  const [galSearching, setGalSearching]   = useState(false);
 
   function flash(m: string, type: 'success' | 'error' = 'success') {
     setMsg(m); setMsgType(type);
@@ -789,6 +793,40 @@ function ApproversTab() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Debounced GAL search
+  useEffect(() => {
+    if (galQuery.trim().length < 2) { setGalResults([]); return; }
+    const timer = setTimeout(async () => {
+      setGalSearching(true);
+      try {
+        const { data, error } = await supabase.functions.invoke('admin-actions', {
+          body: { action: 'search_gal', query: galQuery.trim() },
+        });
+        if (!error && data?.users) setGalResults(data.users as GalUser[]);
+        else setGalResults([]);
+      } catch { setGalResults([]); }
+      setGalSearching(false);
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [galQuery]);
+
+  function selectGalUser(u: GalUser) {
+    setForm({
+      ...form,
+      email: (u.mail ?? u.userPrincipalName).toLowerCase(),
+      display_name: u.displayName,
+      department: u.department ?? form.department,
+    });
+    setGalQuery('');
+    setGalResults([]);
+  }
+
+  function resetForm() {
+    setForm({ display_name: '', email: '', department: '', company: '' });
+    setGalQuery('');
+    setGalResults([]);
+  }
+
   async function addApprover() {
     const { display_name, email, department, company } = form;
     if (!display_name.trim() || !email.trim()) {
@@ -806,7 +844,7 @@ function ApproversTab() {
     if (error) flash('Error: ' + error.message, 'error');
     else {
       flash(`${display_name.trim()} added as approver.`);
-      setForm({ display_name: '', email: '', department: '', company: '' });
+      resetForm();
       setShowForm(false);
       await load();
     }
@@ -843,7 +881,45 @@ function ApproversTab() {
         <div style={s.addForm} className="animate-rise">
           <div style={s.addFormKicker}>§ New approver</div>
           <div style={s.addFormTitle}>Add an approver</div>
-          <div style={s.addFormSub}>They will receive approval request emails and can approve or reject invoices.</div>
+          <div style={s.addFormSub}>
+            Search the directory to find someone, or fill in their details manually.
+          </div>
+
+          {/* GAL search */}
+          <div style={{ marginTop: 16, marginBottom: 4 }}>
+            <label style={s.label}>Search directory (Azure AD)</label>
+            <div style={{ position: 'relative', marginTop: 6 }}>
+              <input
+                style={{ ...s.input, width: '100%', boxSizing: 'border-box', paddingLeft: 36 }}
+                value={galQuery}
+                placeholder="Type a name or email to search…"
+                onChange={(e) => setGalQuery(e.target.value)}
+              />
+              <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', fontSize: 13, color: 'var(--ink-faint)', pointerEvents: 'none' }}>
+                {galSearching ? '⏳' : '⌕'}
+              </span>
+            </div>
+            {galResults.length > 0 && (
+              <div style={gi.dropdown}>
+                {galResults.map((u) => (
+                  <button key={u.id} style={gi.dropdownItem} onClick={() => selectGalUser(u)}>
+                    <div style={gi.dropdownName}>{u.displayName}</div>
+                    <div style={gi.dropdownMeta}>
+                      {(u.mail ?? u.userPrincipalName).toLowerCase()}
+                      {u.department && <> · {u.department}</>}
+                      {u.jobTitle && <> · {u.jobTitle}</>}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+            {galQuery.trim().length >= 2 && !galSearching && galResults.length === 0 && (
+              <div style={{ fontSize: 11.5, color: 'var(--ink-faint)', marginTop: 6, fontStyle: 'italic' }}>
+                No results — fill in manually below.
+              </div>
+            )}
+          </div>
+
           <div style={{ ...s.formGrid, marginTop: 14 }}>
             <div style={s.formGroup}>
               <label style={s.label}>Full name *</label>
@@ -861,7 +937,7 @@ function ApproversTab() {
                 onChange={(e) => setForm({ ...form, department: e.target.value })} />
             </div>
             <div style={s.formGroup}>
-              <label style={s.label}>Company *</label>
+              <label style={s.label}>Company</label>
               <select style={s.input} value={form.company}
                 onChange={(e) => setForm({ ...form, company: e.target.value })}>
                 {companyOptions.map((o) => (
@@ -874,8 +950,7 @@ function ApproversTab() {
             <button className="btn" style={s.btnPrimary} disabled={saving} onClick={addApprover}>
               {saving ? 'Saving…' : 'Add approver →'}
             </button>
-            <button className="btn" style={s.btnSecondary}
-              onClick={() => { setShowForm(false); setForm({ display_name: '', email: '', department: '', company: '' }); }}>
+            <button className="btn" style={s.btnSecondary} onClick={() => { setShowForm(false); resetForm(); }}>
               Cancel
             </button>
           </div>
