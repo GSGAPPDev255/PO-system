@@ -7,6 +7,7 @@ import {
 } from '../hooks/useInvoices';
 import { useMarkReadyForApproval, useApprovers, useAuditLog } from '../hooks/useApprovals';
 import OcrComparisonPanel from '../components/invoice/OcrComparisonPanel';
+import SupplierPicker, { type Supplier } from '../components/SupplierPicker';
 import NominalLineEditor from '../components/invoice/NominalLineEditor';
 import VatLineEditor from '../components/invoice/VatLineEditor';
 import AuditTimeline from '../components/shared/AuditTimeline';
@@ -120,7 +121,7 @@ export default function InvoiceReview() {
             <span style={{ fontFamily: 'var(--font-mono)' }}>
               {String(form.description ?? '').length}
             </span>
-            <span style={{ color: 'var(--ink-faint)' }}> / 75</span>
+            <span style={{ color: 'var(--ink-faint)' }}> / 200</span>
           </span>
         )}
       </div>
@@ -520,7 +521,20 @@ export default function InvoiceReview() {
               {f('account_number', 'Account Number')}
               {f('supplier_name', 'Supplier Name')}
               {f('supplier_ref', 'Supplier Ref')}
-              {f('supplier_ref_code', 'Supplier Ref Code')}
+              <div style={styles.field}>
+                <label style={styles.label}>Supplier Ref Code</label>
+                <SupplierPicker
+                  value={String(form.supplier_ref_code ?? '')}
+                  disabled={!isEditable}
+                  onChange={(code) => setForm((prev) => ({ ...prev, supplier_ref_code: code || null }))}
+                  onSelect={(s: Supplier) => setForm((prev) => ({
+                    ...prev,
+                    supplier_ref_code: s.code,
+                    supplier_name: prev.supplier_name?.trim() ? prev.supplier_name : s.name,
+                    account_number: prev.account_number?.trim() ? prev.account_number : s.code,
+                  }))}
+                />
+              </div>
             </div>
           </Section>
 
