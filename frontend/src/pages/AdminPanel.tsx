@@ -281,12 +281,22 @@ function UsersTab() {
     const timer = setTimeout(async () => {
       setGalSearching(true);
       try {
-        const { data, error } = await supabase.functions.invoke('admin-actions', {
-          body: { action: 'search_gal', query: galQuery.trim() },
+        const { data, error } = await supabase.functions.invoke('gal-search', {
+          body: { query: galQuery.trim() },
         });
-        if (!error && data?.users) setGalResults(data.users as GalUser[]);
-        else setGalResults([]);
-      } catch { setGalResults([]); }
+        if (!error && data?.users) {
+          setGalResults(data.users as GalUser[]);
+        } else {
+          // Surface the real Graph error to the console so we can see what's
+          // actually blocking the search (token / permissions / etc.)
+          if (error) console.error('[GAL search] invoke error:', error);
+          if (data?.error) console.error('[GAL search] graph error:', data);
+          setGalResults([]);
+        }
+      } catch (e) {
+        console.error('[GAL search] exception:', e);
+        setGalResults([]);
+      }
       setGalSearching(false);
     }, 350);
     return () => clearTimeout(timer);
@@ -973,12 +983,22 @@ function ApproversTab() {
     const timer = setTimeout(async () => {
       setGalSearching(true);
       try {
-        const { data, error } = await supabase.functions.invoke('admin-actions', {
-          body: { action: 'search_gal', query: galQuery.trim() },
+        const { data, error } = await supabase.functions.invoke('gal-search', {
+          body: { query: galQuery.trim() },
         });
-        if (!error && data?.users) setGalResults(data.users as GalUser[]);
-        else setGalResults([]);
-      } catch { setGalResults([]); }
+        if (!error && data?.users) {
+          setGalResults(data.users as GalUser[]);
+        } else {
+          // Surface the real Graph error to the console so we can see what's
+          // actually blocking the search (token / permissions / etc.)
+          if (error) console.error('[GAL search] invoke error:', error);
+          if (data?.error) console.error('[GAL search] graph error:', data);
+          setGalResults([]);
+        }
+      } catch (e) {
+        console.error('[GAL search] exception:', e);
+        setGalResults([]);
+      }
       setGalSearching(false);
     }, 350);
     return () => clearTimeout(timer);
