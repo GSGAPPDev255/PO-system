@@ -46,25 +46,57 @@ export function useApprovers(company?: string | null) {
   });
 }
 
+export interface MarkReadyPayload {
+  poId: string;
+  // When to send the approval email:
+  //  - undefined / null  → send immediately (calls send-approval inline)
+  //  - ISO timestamp     → queue for the dispatcher cron at that time
+  scheduledAt?: string | null;
+}
+
 export function useMarkReadyForApproval() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (poId: string) => {
-      const { data: { user } } = await supabase.auth.getUser();
+    mutationFn: async (payload: MarkReadyPayload | string) => {
+      // Backwards compat — older callers passed just the poId as a string.
+      const { poId, scheduledAt } =
+        typeof payload === 'string' ? { poId: payload, scheduledAt: null } : payload;
 
-      // Flip status first so the send-approval function (which requires
-      // status='pending_approval') accepts the PO.
+      const { data: { user } } = await supabase.auth.getUser();
+      const isScheduled = !!scheduledAt;
+
+      // Flip status to pending_approval; for scheduled sends also stamp the
+      // scheduled_send_at — the dispatcher cron picks them up at the right time.
       const { data, error } = await supabase
         .from('purchase_orders')
-        .update({ status: 'pending_approval', updated_by_id: user?.id })
+        .update({
+          status: 'pending_approval',
+          updated_by_id: user?.id,
+          scheduled_send_at: scheduledAt ?? null,
+        })
         .eq('id', poId)
         .select()
         .single();
       if (error) throw error;
 
-      // Trigger send-approval edge function. If this fails we must roll the
-      // status back — otherwise the PO is stuck "pending approval" with no
-      // email ever sent and no way to resend from the UI.
+      // Scheduled sends: just record an audit entry. The actual email goes out
+      // when dispatch-scheduled-approvals fires at the scheduled time.
+      if (isScheduled) {
+        await supabase.from('audit_log').insert({
+          purchase_order_id: poId,
+          action: 'status_changed',
+          actor_id: user?.id,
+          metadata: {
+            new_status: 'pending_approval',
+            scheduled_send_at: scheduledAt,
+            kind: 'scheduled_approval',
+          },
+        });
+        return data;
+      }
+
+      // Immediate send. If this fails we must roll the status back — otherwise
+      // the PO is stuck "pending approval" with no email ever sent.
       const { error: fnError, data: fnData } = await supabase.functions.invoke(
         'send-approval',
         { body: { purchase_order_id: poId } },
@@ -72,10 +104,9 @@ export function useMarkReadyForApproval() {
       if (fnError) {
         await supabase
           .from('purchase_orders')
-          .update({ status: 'pending_finance_review', updated_by_id: user?.id })
+          .update({ status: 'pending_finance_review', updated_by_id: user?.id, scheduled_send_at: null })
           .eq('id', poId);
 
-        // FunctionsHttpError swallows the body — surface a useful message.
         let detail = fnError.message || 'Edge function error';
         try {
           const ctx = (fnError as { context?: { json?: () => Promise<unknown> } }).context;
@@ -86,16 +117,90 @@ export function useMarkReadyForApproval() {
         } catch { /* ignore */ }
         throw new Error(`Failed to send approval email: ${detail}`);
       }
-      // Some edge runtimes return { error } in the data payload rather than fnError
       if (fnData && typeof fnData === 'object' && 'error' in fnData && fnData.error) {
         await supabase
           .from('purchase_orders')
-          .update({ status: 'pending_finance_review', updated_by_id: user?.id })
+          .update({ status: 'pending_finance_review', updated_by_id: user?.id, scheduled_send_at: null })
           .eq('id', poId);
         throw new Error(`Failed to send approval email: ${String(fnData.error)}`);
       }
 
       return data;
+    },
+    onSuccess: (_, payload) => {
+      const poId = typeof payload === 'string' ? payload : payload.poId;
+      qc.invalidateQueries({ queryKey: ['invoice', poId] });
+      qc.invalidateQueries({ queryKey: ['invoices'] });
+      qc.invalidateQueries({ queryKey: ['audit', poId] });
+    },
+  });
+}
+
+// Cancel a scheduled send — reverts back to pending_finance_review so the
+// invoice re-appears in the review queue and finance can amend it.
+export function useCancelScheduledSend() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (poId: string) => {
+      const { data: { user } } = await supabase.auth.getUser();
+      const { data, error } = await supabase
+        .from('purchase_orders')
+        .update({
+          status: 'pending_finance_review',
+          scheduled_send_at: null,
+          updated_by_id: user?.id,
+        })
+        .eq('id', poId)
+        .select()
+        .single();
+      if (error) throw error;
+
+      await supabase.from('audit_log').insert({
+        purchase_order_id: poId,
+        action: 'status_changed',
+        actor_id: user?.id,
+        metadata: { new_status: 'pending_finance_review', kind: 'scheduled_send_cancelled' },
+      });
+      return data;
+    },
+    onSuccess: (_, poId) => {
+      qc.invalidateQueries({ queryKey: ['invoice', poId] });
+      qc.invalidateQueries({ queryKey: ['invoices'] });
+      qc.invalidateQueries({ queryKey: ['audit', poId] });
+    },
+  });
+}
+
+// Send a queued/scheduled PO now (bypasses the scheduled time, status already
+// pending_approval — just clear scheduled_send_at and fire send-approval).
+export function useSendScheduledNow() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (poId: string) => {
+      const { data: { user } } = await supabase.auth.getUser();
+
+      const { error: clearErr } = await supabase
+        .from('purchase_orders')
+        .update({ scheduled_send_at: null, updated_by_id: user?.id })
+        .eq('id', poId);
+      if (clearErr) throw clearErr;
+
+      const { error: fnError } = await supabase.functions.invoke(
+        'send-approval',
+        { body: { purchase_order_id: poId } },
+      );
+      if (fnError) {
+        let detail = fnError.message || 'Edge function error';
+        try {
+          const ctx = (fnError as { context?: { json?: () => Promise<unknown> } }).context;
+          if (ctx?.json) {
+            const body = await ctx.json() as { error?: string };
+            if (body?.error) detail = body.error;
+          }
+        } catch { /* ignore */ }
+        throw new Error(`Failed to send approval email: ${detail}`);
+      }
+      return true;
     },
     onSuccess: (_, poId) => {
       qc.invalidateQueries({ queryKey: ['invoice', poId] });

@@ -13,6 +13,8 @@ import VatLineEditor from '../components/invoice/VatLineEditor';
 import AuditTimeline from '../components/shared/AuditTimeline';
 import StatusBadge from '../components/shared/StatusBadge';
 import ConfirmDialog from '../components/shared/ConfirmDialog';
+import SendApprovalControls from '../components/invoice/SendApprovalControls';
+import ScheduledSendBanner from '../components/invoice/ScheduledSendBanner';
 import { getInvoiceSignedUrl } from '../lib/auth';
 import { supabase } from '../lib/supabase';
 import type { PurchaseOrder, NominalLine, VatLine } from '../lib/supabase';
@@ -40,7 +42,6 @@ export default function InvoiceReview() {
   const [vat1, setVat1] = useState<Partial<VatLine>>({});
   const [vat2, setVat2] = useState<Partial<VatLine>>({});
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
-  const [showConfirm, setShowConfirm] = useState(false);
   const [showDismissConfirm, setShowDismissConfirm] = useState(false);
   const [dismissing, setDismissing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -216,19 +217,17 @@ export default function InvoiceReview() {
     return errors;
   };
 
-  const handleMarkReady = async () => {
+  const handleMarkReady = async (scheduledAt: string | null = null) => {
     const validationErrors = validateReadyForApproval();
     if (validationErrors.length > 0) {
       setSaveError(validationErrors);
-      setShowConfirm(false);
       return;
     }
 
-    setShowConfirm(false);
     try {
       // Auto-save any unsaved form changes before sending for approval
       await handleSave();
-      await markReady.mutateAsync(id!);
+      await markReady.mutateAsync({ poId: id!, scheduledAt });
     } catch (e) {
       setSaveError([(e as Error).message]);
     }
@@ -369,36 +368,24 @@ export default function InvoiceReview() {
                     )}
                   </div>
                 ) : (
-                  <div style={styles.approvalBtnWrap}>
-                    <button
-                      className="btn"
-                      style={{
-                        ...styles.approvalBtn,
-                        ...(form.assigned_approver_id ? {} : styles.approvalBtnDisabled),
-                      }}
-                      onClick={() => setShowConfirm(true)}
-                      disabled={!form.assigned_approver_id}
-                      title={
-                        form.assigned_approver_id
-                          ? 'Send approval email to the assigned approver'
-                          : 'Assign a Primary Approver below to enable this button'
-                      }
-                    >
-                      Send for Approval
-                      <span style={styles.approvalArrow}>→</span>
-                    </button>
-                    {!form.assigned_approver_id && (
-                      <span style={styles.approvalHint}>
-                        Assign a primary approver below
-                      </span>
-                    )}
-                  </div>
+                  <SendApprovalControls
+                    disabled={!form.assigned_approver_id}
+                    hint={!form.assigned_approver_id ? 'Assign a primary approver below' : undefined}
+                    busy={markReady.isPending}
+                    onSend={(scheduledAt) => { void handleMarkReady(scheduledAt); }}
+                  />
                 )}
               </div>
             )}
           </div>
         </div>
       </div>
+
+      {poData.status === 'pending_approval'
+        && poData.scheduled_send_at
+        && !poData.approval_sent_at && (
+        <ScheduledSendBanner poId={id!} scheduledAt={poData.scheduled_send_at} />
+      )}
 
       {saveError && <div style={styles.errorBanner}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -643,15 +630,8 @@ export default function InvoiceReview() {
         </div>
       </div>
 
-      {showConfirm && (
-        <ConfirmDialog
-          title="Send for Approval"
-          message="An approval email will be dispatched to the assigned approver. The invoice will become read-only for finance until the decision is returned."
-          confirmLabel="Send approval email"
-          onConfirm={handleMarkReady}
-          onCancel={() => setShowConfirm(false)}
-        />
-      )}
+      {/* showConfirm dialog removed — SendApprovalControls is explicit enough
+          (each option is named) and the scheduled flow needs no confirmation. */}
 
       {showDismissConfirm && (
         <ConfirmDialog

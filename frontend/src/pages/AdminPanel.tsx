@@ -1576,7 +1576,10 @@ const co: Record<string, React.CSSProperties> = {
 
 // ─── Alerts Tab ───────────────────────────────────────────────────────────────
 
-const ALERT_KEYS = ['alert_cc_emails', 'admin_alert_email', 'reminder_days', 'max_reminders'];
+const ALERT_KEYS = [
+  'alert_cc_emails', 'admin_alert_email', 'reminder_days', 'max_reminders',
+  'batch_send_enabled', 'batch_send_time', 'batch_send_days',
+];
 
 function AlertsTab() {
   const [settings, setSettings] = useState<Record<string, string>>({});
@@ -1669,6 +1672,38 @@ function AlertsTab() {
             width={120}
             onChange={(v) => setSettings({ ...settings, max_reminders: v })}
           />
+
+          {/* ── Batch send schedule ──────────────────────────────────────── */}
+          <div style={{ padding: '14px 26px 6px', borderTop: '1px solid var(--line)', marginTop: 8 }}>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 700, color: 'var(--accent-text)', letterSpacing: '0.18em', textTransform: 'uppercase' }}>§ Approval batch schedule</div>
+            <div style={{ fontSize: 12.5, color: 'var(--ink-muted)', marginTop: 6, lineHeight: 1.55 }}>
+              When finance marks an invoice ready for approval, they can pick "Send at next batch" — this is the slot used.
+            </div>
+          </div>
+          <SettingRow
+            label="Batch enabled"
+            desc='Set to "true" to offer the "Send at next batch" option, or "false" to hide it.'
+            value={settings['batch_send_enabled'] ?? 'true'}
+            placeholder="true"
+            width={120}
+            onChange={(v) => setSettings({ ...settings, batch_send_enabled: v })}
+          />
+          <SettingRow
+            label="Batch send time"
+            desc='Time of day the batch goes out (24h HH:MM, Europe/London).'
+            value={settings['batch_send_time'] ?? '09:00'}
+            placeholder="09:00"
+            width={120}
+            onChange={(v) => setSettings({ ...settings, batch_send_time: v })}
+          />
+          <SettingRow
+            label="Batch send days"
+            desc='Comma-separated lowercase day names. e.g. "mon,tue,wed,thu,fri" for weekdays only.'
+            value={settings['batch_send_days'] ?? 'mon,tue,wed,thu,fri'}
+            placeholder="mon,tue,wed,thu,fri"
+            width={260}
+            onChange={(v) => setSettings({ ...settings, batch_send_days: v })}
+          />
         </div>
 
         <div style={{ padding: '0 26px 26px' }}>
@@ -1709,15 +1744,16 @@ function SettingRow({
 interface FnStatus { name: string; label: string; schedule: string }
 
 const FUNCTIONS: FnStatus[] = [
-  { name: 'email-intake',       label: 'Email intake',        schedule: 'Every 5 minutes' },
-  { name: 'reminder-scheduler', label: 'Reminder scheduler',  schedule: 'Daily · 08:00 UTC' },
-  { name: 'finance-digest',     label: 'Finance digest',      schedule: 'Daily · 08:30 UTC' },
-  { name: 'sync-approvers',     label: 'Sync approvers',      schedule: 'Daily · 09:00 UTC' },
-  { name: 'gemini-processor',   label: 'Gemini processor',    schedule: 'On-demand' },
-  { name: 'send-approval',      label: 'Send approval',       schedule: 'On-demand' },
-  { name: 'process-approval',   label: 'Process approval',    schedule: 'On-demand' },
-  { name: 'generate-csv',       label: 'Generate CSV',        schedule: 'On-demand' },
-  { name: 'admin-actions',      label: 'Admin actions',       schedule: 'On-demand' },
+  { name: 'email-intake',                 label: 'Email intake',           schedule: 'Every 5 minutes' },
+  { name: 'dispatch-scheduled-approvals', label: 'Scheduled approval send', schedule: 'Every 5 minutes' },
+  { name: 'reminder-scheduler',           label: 'Reminder scheduler',     schedule: 'Daily · 08:00 UTC' },
+  { name: 'finance-digest',               label: 'Finance digest',         schedule: 'Daily · 08:30 UTC' },
+  { name: 'sync-approvers',               label: 'Sync approvers',         schedule: 'Daily · 09:00 UTC' },
+  { name: 'gemini-processor',             label: 'Gemini processor',       schedule: 'On-demand' },
+  { name: 'send-approval',                label: 'Send approval',          schedule: 'On-demand' },
+  { name: 'process-approval',             label: 'Process approval',       schedule: 'On-demand' },
+  { name: 'generate-csv',                 label: 'Generate CSV',           schedule: 'On-demand' },
+  { name: 'admin-actions',                label: 'Admin actions',          schedule: 'On-demand' },
 ];
 
 function SystemTab() {

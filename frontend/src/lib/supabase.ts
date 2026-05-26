@@ -104,6 +104,7 @@ export interface PurchaseOrder {
   forwarded_to_id: string | null;
   forwarded_reason: string | null;
   approval_sent_at: string | null;
+  scheduled_send_at: string | null;
   approver_comments: string | null;
   exported_at: string | null;
   exported_by_id: string | null;
@@ -204,6 +205,7 @@ export interface Expense {
   forwarded_to_id: string | null;
   forwarded_reason: string | null;
   approval_sent_at: string | null;
+  scheduled_send_at: string | null;
   approver_comments: string | null;
   exported_at: string | null;
   exported_by_id: string | null;
