@@ -526,6 +526,7 @@ export default function InvoiceReview() {
                 <SupplierPicker
                   value={String(form.supplier_ref_code ?? '')}
                   disabled={!isEditable}
+                  allowCreate={isEditable}
                   onChange={(code) => setForm((prev) => ({ ...prev, supplier_ref_code: code || null }))}
                   onSelect={(s: Supplier) => setForm((prev) => ({
                     ...prev,

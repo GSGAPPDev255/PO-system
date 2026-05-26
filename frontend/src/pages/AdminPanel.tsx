@@ -10,7 +10,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import type { Profile, UserRole } from '../lib/supabase';
 
-type Tab = 'users' | 'approvers' | 'companies' | 'alerts' | 'system';
+type Tab = 'users' | 'approvers' | 'suppliers' | 'companies' | 'alerts' | 'system';
 
 interface SystemSetting { key: string; value: string; description: string }
 
@@ -35,9 +35,10 @@ const ROLE_TINTS: Record<UserRole, { bg: string; color: string; border: string }
 const TAB_META: { id: Tab; number: string; label: string }[] = [
   { id: 'users',     number: '01', label: 'Users' },
   { id: 'approvers', number: '02', label: 'Approvers' },
-  { id: 'companies', number: '03', label: 'Companies' },
-  { id: 'alerts',    number: '04', label: 'Alerts' },
-  { id: 'system',    number: '05', label: 'System' },
+  { id: 'suppliers', number: '03', label: 'Suppliers' },
+  { id: 'companies', number: '04', label: 'Companies' },
+  { id: 'alerts',    number: '05', label: 'Alerts' },
+  { id: 'system',    number: '06', label: 'System' },
 ];
 
 export default function AdminPanel() {
@@ -79,6 +80,7 @@ export default function AdminPanel() {
       <div style={s.content}>
         {tab === 'users'     && <UsersTab />}
         {tab === 'approvers' && <ApproversTab />}
+        {tab === 'suppliers' && <SuppliersTab />}
         {tab === 'companies' && <CompaniesTab />}
         {tab === 'alerts'    && <AlertsTab />}
         {tab === 'system'    && <SystemTab />}
@@ -1044,6 +1046,166 @@ const ap: Record<string, React.CSSProperties> = {
     flexShrink: 0,
   },
 };
+
+// ─── Suppliers Tab ───────────────────────────────────────────────────────────
+
+interface SupplierRow {
+  code: string;
+  name: string;
+  short_name: string | null;
+  payment_group: string | null;
+  is_active: boolean;
+}
+
+function SuppliersTab() {
+  const [suppliers, setSuppliers] = useState<SupplierRow[]>([]);
+  const [search, setSearch]       = useState('');
+  const [loading, setLoading]     = useState(true);
+  const [deleting, setDeleting]   = useState<string | null>(null);
+  const [msg, setMsg]             = useState('');
+  const [msgType, setMsgType]     = useState<'success' | 'error'>('success');
+
+  function flash(m: string, type: 'success' | 'error' = 'success') {
+    setMsg(m); setMsgType(type);
+    setTimeout(() => setMsg(''), 4000);
+  }
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('suppliers')
+      .select('code, name, short_name, payment_group, is_active')
+      .order('name');
+    if (error) flash('Could not load suppliers: ' + error.message, 'error');
+    setSuppliers((data as SupplierRow[]) ?? []);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function toggleActive(s: SupplierRow) {
+    setDeleting(s.code);
+    const { error } = await supabase
+      .from('suppliers')
+      .update({ is_active: !s.is_active })
+      .eq('code', s.code);
+    if (error) flash('Error: ' + error.message, 'error');
+    else {
+      flash(`${s.name} ${s.is_active ? 'deactivated' : 'activated'}.`);
+      await load();
+    }
+    setDeleting(null);
+  }
+
+  async function deleteSupplier(s: SupplierRow) {
+    if (!confirm(`Permanently delete "${s.name}" (${s.code})?\n\nThis won't affect existing invoices — they keep the code as text.`)) return;
+    setDeleting(s.code);
+    const { error } = await supabase.from('suppliers').delete().eq('code', s.code);
+    if (error) flash('Error: ' + error.message, 'error');
+    else { flash(`${s.name} deleted.`); await load(); }
+    setDeleting(null);
+  }
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return suppliers;
+    return suppliers.filter(s =>
+      s.code.toLowerCase().includes(q) ||
+      s.name.toLowerCase().includes(q) ||
+      (s.short_name?.toLowerCase().includes(q) ?? false),
+    );
+  }, [suppliers, search]);
+
+  return (
+    <div>
+      <SectionHeader
+        title="Supplier master list"
+        subtitle={`${suppliers.length} suppliers. Deactivate to hide from the picker, or delete to remove permanently.`}
+        msg={msg}
+        msgType={msgType}
+        actions={
+          <input
+            style={{ ...s.input, width: 260 }}
+            placeholder="Search code or name…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        }
+      />
+
+      <div style={s.card}>
+        {loading ? (
+          <div style={s.loading}>Loading suppliers…</div>
+        ) : (
+          <table style={s.table}>
+            <thead>
+              <tr>
+                <th style={s.th}>Code</th>
+                <th style={s.th}>Name</th>
+                <th style={s.th}>Payment group</th>
+                <th style={s.th}>Status</th>
+                <th style={{ ...s.th, textAlign: 'right' }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((sup, idx) => (
+                <tr key={sup.code} style={{ ...s.row, ...(idx % 2 === 1 ? s.rowAlt : {}), opacity: sup.is_active ? 1 : 0.5 }}>
+                  <td style={{ ...s.td, ...s.mono, fontSize: 12 }}>{sup.code}</td>
+                  <td style={s.td}>
+                    <div style={s.name}>{sup.name}</div>
+                    {sup.short_name && <div style={{ fontSize: 11, color: 'var(--ink-faint)', marginTop: 1 }}>{sup.short_name}</div>}
+                  </td>
+                  <td style={s.td}>
+                    {sup.payment_group && sup.payment_group !== 'supplier' ? (
+                      <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 10, background: 'var(--accent-soft)', color: 'var(--accent-text)', textTransform: 'uppercase' as const, letterSpacing: '0.1em' }}>
+                        {sup.payment_group}
+                      </span>
+                    ) : (
+                      <span style={s.faint}>—</span>
+                    )}
+                  </td>
+                  <td style={s.td}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ ...s.statusDot, background: sup.is_active ? 'var(--success)' : 'var(--ink-faint)' }} />
+                      <span style={{ fontSize: 12, color: sup.is_active ? 'var(--ink)' : 'var(--ink-faint)' }}>
+                        {sup.is_active ? 'Active' : 'Inactive'}
+                      </span>
+                    </span>
+                  </td>
+                  <td style={{ ...s.td, textAlign: 'right' }}>
+                    <div style={{ display: 'inline-flex', gap: 6 }}>
+                      <button
+                        className="btn"
+                        style={sup.is_active ? s.btnSecondary : s.btnSecondary}
+                        disabled={deleting === sup.code}
+                        onClick={() => toggleActive(sup)}
+                      >
+                        {deleting === sup.code ? '…' : sup.is_active ? 'Deactivate' : 'Activate'}
+                      </button>
+                      <button
+                        className="btn"
+                        style={s.btnDanger}
+                        disabled={deleting === sup.code}
+                        onClick={() => deleteSupplier(sup)}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {!loading && filtered.length === 0 && (
+          <div style={s.empty}>
+            {search ? `No suppliers match "${search}".` : 'No suppliers yet.'}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 // ─── Companies Tab ────────────────────────────────────────────────────────────
 
