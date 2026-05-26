@@ -394,12 +394,12 @@ export default function MyExpenseDetail() {
           <div style={styles.field}>
             <label style={styles.label}>
               Description
-              <span style={styles.charCount}>{description.length}/75</span>
+              <span style={styles.charCount}>{description.length}/200</span>
             </label>
             <textarea
               style={{ ...styles.textarea, ...(!canEdit ? styles.inputDisabled : {}) }}
               value={description}
-              onChange={e => { if (e.target.value.length <= 75) { setDescription(e.target.value); markDirty(); } }}
+              onChange={e => { if (e.target.value.length <= 200) { setDescription(e.target.value); markDirty(); } }}
               disabled={!canEdit}
               rows={3}
               placeholder="Brief description of what this expense is for…"

@@ -346,7 +346,7 @@ export default function ExpenseReview() {
               </div>
             </div>
 
-            {field('Description', inp('description'), 'Max 75 characters')}
+            {field('Description', inp('description'), 'Max 200 characters')}
 
             {/* Accounting GL fields */}
             <div style={{ borderTop: '1px solid var(--line)', margin: '16px 0', paddingTop: 16 }}>

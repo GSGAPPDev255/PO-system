@@ -99,7 +99,7 @@ export default function InvoiceReview() {
             value={String(form[key] ?? '')}
             readOnly={!isEditable}
             disabled={!isEditable}
-            maxLength={key === 'description' ? 75 : undefined}
+            maxLength={key === 'description' ? 200 : undefined}
             onChange={(e) => setForm((prev) => ({ ...prev, [key]: e.target.value || null }))}
           />
         ) : (
@@ -533,7 +533,7 @@ export default function InvoiceReview() {
               {f('posting_date', 'Posting Date', 'date')}
             </div>
             <div style={{ marginTop: 14 }}>
-              {f('description', 'Description (max 75 chars)', 'textarea')}
+              {f('description', 'Description (max 200 chars)', 'textarea')}
             </div>
           </Section>
 
