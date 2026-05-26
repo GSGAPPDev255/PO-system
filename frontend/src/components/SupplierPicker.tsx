@@ -71,7 +71,7 @@ export default function SupplierPicker({
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return suppliers.slice(0, 50);
+    if (!q || q.length < 1) return [];
     const matches = suppliers.filter(s =>
       s.code.toLowerCase().includes(q) ||
       s.name.toLowerCase().includes(q) ||
@@ -152,7 +152,9 @@ export default function SupplierPicker({
       {open && !disabled && filtered.length === 0 && (
         <div style={menuStyle}>
           <div style={{ ...rowStyle, color: 'var(--ink-faint)', fontStyle: 'italic' }}>
-            No suppliers match "{query}"
+            {query.trim().length < 1
+              ? 'Type a code or supplier name to search…'
+              : `No suppliers match "${query}"`}
           </div>
         </div>
       )}
