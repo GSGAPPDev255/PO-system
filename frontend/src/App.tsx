@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from './lib/supabase';
 import type { Profile } from './lib/supabase';
 import AppShell from './components/layout/AppShell';
@@ -28,6 +28,44 @@ function setCachedProfile(p: Profile | null) {
     if (p) localStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(p));
     else localStorage.removeItem(PROFILE_CACHE_KEY);
   } catch { /* storage full / private mode */ }
+}
+
+// ── Auth callback component ───────────────────────────────────────────────────
+// Handles the PKCE exchange redirect from Microsoft/Supabase.
+// - If the URL hash contains an error (e.g. expired client secret), surfaces it
+//   and sends the user back to /login.
+// - If profile resolves to null after auth, also returns to /login rather than
+//   spinning forever.
+function AuthCallback({ profile }: { profile: Profile | null | undefined }) {
+  const location = useLocation();
+
+  // Parse error params from the URL hash (#error=...&error_description=...)
+  const hashParams = new URLSearchParams(location.hash.replace(/^#/, ''));
+  const authError = hashParams.get('error_description') ?? hashParams.get('error');
+
+  // Auth failed at provider level — send back to login with an error message.
+  if (authError) {
+    return <Navigate to="/login" state={{ authError }} replace />;
+  }
+
+  // Auth resolved and we have a profile → go to the app.
+  if (profile) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  // Profile resolved to null (no profile row, or auth was rejected silently)
+  // → return to login rather than spinning forever.
+  if (profile === null) {
+    return <Navigate to="/login" state={{ authError: 'Sign-in did not complete. Please try again.' }} replace />;
+  }
+
+  // profile === undefined → still waiting for Supabase to exchange the code.
+  return (
+    <div style={styles.center}>
+      <div style={styles.spinner} />
+      <span style={styles.spinnerLabel}>Signing in</span>
+    </div>
+  );
 }
 
 export default function App() {
@@ -133,16 +171,7 @@ export default function App() {
   return (
     <Routes>
       {/* Auth callback — detectSessionInUrl handles the PKCE exchange automatically */}
-      <Route path="/auth/callback" element={
-        profile
-          ? <Navigate to="/dashboard" replace />
-          : (
-            <div style={styles.center}>
-              <div style={styles.spinner} />
-              <span style={styles.spinnerLabel}>Signing in</span>
-            </div>
-          )
-      } />
+      <Route path="/auth/callback" element={<AuthCallback profile={profile} />} />
 
       {/* Public login */}
       <Route

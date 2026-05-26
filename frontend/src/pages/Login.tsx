@@ -1,15 +1,34 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { signInWithAzureAD } from '../lib/auth';
 
 export default function Login() {
+  const location = useLocation();
+  const navState = location.state as { authError?: string } | null;
+
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Pre-populate error from navigation state (e.g. redirected back from auth callback).
+  const [error, setError] = useState<string | null>(navState?.authError ?? null);
+
+  // Safety net: if the browser doesn't navigate away within 25 s, drop the
+  // overlay and show an actionable error rather than spinning forever.
+  useEffect(() => {
+    if (!loading) return;
+    const t = setTimeout(() => {
+      setLoading(false);
+      setError('Sign-in timed out — the Microsoft redirect did not complete. Please try again or contact the finance team.');
+    }, 25_000);
+    return () => clearTimeout(t);
+  }, [loading]);
 
   const handleLogin = async () => {
     setLoading(true);
     setError(null);
     try {
       await signInWithAzureAD();
+      // signInWithOAuth triggers a browser redirect — execution should never
+      // reach here in normal operation. The useEffect timeout above handles
+      // the case where the redirect is silently blocked or fails.
     } catch (e) {
       setError((e as Error).message);
       setLoading(false);
