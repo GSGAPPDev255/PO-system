@@ -111,6 +111,7 @@ function UsersTab() {
   const [accessMap, setAccessMap]     = useState<Record<string, string[]>>({});  // profile_id → company slugs
   const [expandedAccess, setExpandedAccess] = useState<string | null>(null);  // profile_id being edited
   const [accessSaving, setAccessSaving]     = useState<string | null>(null);
+  const [editingId, setEditingId]           = useState<string | null>(null);   // profile being edited inline
   const [loading, setLoading]         = useState(true);
   const [saving, setSaving]           = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
@@ -184,6 +185,46 @@ function UsersTab() {
     const { error } = await supabase.from('profiles').update({ is_active: !current, updated_at: new Date().toISOString() }).eq('id', id);
     if (error) flash('Error: ' + error.message, 'error');
     else { flash('Status updated.'); await load(); }
+    setSaving(null);
+  }
+
+  async function editUser(id: string, display_name: string, email: string) {
+    setSaving(id);
+    try {
+      const { data, error } = await supabase.functions.invoke('manage-users', {
+        body: { action: 'update_user', id, display_name, email },
+      });
+      if (error) throw new Error(error.message);
+      if (data?.error) throw new Error(data.error);
+      flash('User updated.');
+      setEditingId(null);
+      await load();
+    } catch (e) {
+      flash('Error: ' + (e as Error).message, 'error');
+    }
+    setSaving(null);
+  }
+
+  async function deleteUser(id: string, name: string) {
+    if (id === currentUserId) {
+      flash('You cannot delete your own account.', 'error');
+      return;
+    }
+    if (!confirm(`Permanently delete ${name}?\n\nThis removes their sign-in and profile but keeps their existing POs and audit entries (actor will show as "deleted user").`)) {
+      return;
+    }
+    setSaving(id);
+    try {
+      const { data, error } = await supabase.functions.invoke('manage-users', {
+        body: { action: 'delete_user', id },
+      });
+      if (error) throw new Error(error.message);
+      if (data?.error) throw new Error(data.error);
+      flash(data?.message ?? `${name} deleted.`);
+      await load();
+    } catch (e) {
+      flash('Error: ' + (e as Error).message, 'error');
+    }
     setSaving(null);
   }
 
@@ -495,7 +536,7 @@ function UsersTab() {
                           {saving === p.id ? '…' : 'Restore'}
                         </button>
                       ) : (
-                        <div style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                        <div style={{ display: 'inline-flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                           <select
                             style={s.selectSm}
                             value={p.role}
@@ -504,6 +545,15 @@ function UsersTab() {
                           >
                             {ROLE_OPTIONS.map((r) => <option key={r} value={r}>{r}</option>)}
                           </select>
+                          <button
+                            className="btn"
+                            style={s.btnSecondary}
+                            disabled={saving === p.id}
+                            onClick={() => setEditingId(editingId === p.id ? null : p.id)}
+                            title="Edit name or email"
+                          >
+                            Edit
+                          </button>
                           <button
                             className="btn"
                             style={p.is_active ? s.btnDanger : s.btnSecondary}
@@ -523,10 +573,33 @@ function UsersTab() {
                               Archive
                             </button>
                           )}
+                          <button
+                            className="btn"
+                            style={s.btnDanger}
+                            disabled={saving === p.id}
+                            onClick={() => deleteUser(p.id, p.display_name)}
+                            title="Permanently delete this user"
+                          >
+                            Delete
+                          </button>
                         </div>
                       )}
                     </td>
                   </tr>
+
+                  {/* Inline user-edit row */}
+                  {editingId === p.id && !isArchived && (
+                    <tr key={`${p.id}-edit`}>
+                      <td colSpan={6} style={{ padding: 0, borderBottom: '1px solid var(--line)' }}>
+                        <UserEditor
+                          profile={p}
+                          saving={saving === p.id}
+                          onSave={(name, email) => editUser(p.id, name, email)}
+                          onCancel={() => setEditingId(null)}
+                        />
+                      </td>
+                    </tr>
+                  )}
 
                   {/* Inline company access editor */}
                   {isExpanded && isFinance && (
@@ -633,6 +706,105 @@ function CompanyAccessEditor({
     </div>
   );
 }
+
+// ─── Inline user editor (rename / change email) ──────────────────────────────
+
+function UserEditor({
+  profile, saving, onSave, onCancel,
+}: {
+  profile: Profile;
+  saving: boolean;
+  onSave: (display_name: string, email: string) => void;
+  onCancel: () => void;
+}) {
+  const [name, setName]   = useState(profile.display_name);
+  const [email, setEmail] = useState(profile.email);
+
+  const noChange = name.trim() === profile.display_name && email.trim().toLowerCase() === profile.email.toLowerCase();
+
+  return (
+    <div style={ue.wrap}>
+      <div style={ue.header}>
+        <div style={ue.kicker}>§ Edit user</div>
+        <div style={ue.title}>{profile.display_name}</div>
+      </div>
+      <div style={ue.grid}>
+        <div>
+          <label style={ue.label}>Full name</label>
+          <input style={ue.input} value={name} onChange={(e) => setName(e.target.value)} />
+        </div>
+        <div>
+          <label style={ue.label}>Email address</label>
+          <input style={ue.input} type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+          <div style={ue.warn}>
+            Changing email also updates the Supabase auth account — they will sign in with the new address next time.
+          </div>
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
+        <button
+          className="btn"
+          style={s.btnPrimary}
+          disabled={saving || noChange || !name.trim() || !email.trim()}
+          onClick={() => onSave(name.trim(), email.trim().toLowerCase())}
+        >
+          {saving ? 'Saving…' : 'Save changes →'}
+        </button>
+        <button className="btn" style={s.btnSecondary} onClick={onCancel}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+const ue: Record<string, React.CSSProperties> = {
+  wrap: { padding: '20px 24px', background: 'var(--paper)', borderTop: '2px solid var(--accent)' },
+  header: { marginBottom: 14 },
+  kicker: {
+    fontFamily: 'var(--font-mono)',
+    fontSize: 10,
+    color: 'var(--accent)',
+    fontWeight: 600,
+    letterSpacing: '0.16em',
+    textTransform: 'uppercase',
+    marginBottom: 4,
+  },
+  title: {
+    fontFamily: 'var(--font-display)',
+    fontSize: 18,
+    fontWeight: 400,
+    color: 'var(--ink)',
+    letterSpacing: '-0.01em',
+  },
+  grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14 },
+  label: {
+    display: 'block',
+    fontSize: 10,
+    fontWeight: 600,
+    color: 'var(--ink-muted)',
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.18em',
+    marginBottom: 6,
+  },
+  input: {
+    width: '100%',
+    padding: '10px 12px',
+    fontSize: 13,
+    fontFamily: 'var(--font-mono)',
+    background: 'var(--paper-bright)',
+    border: '1px solid var(--line)',
+    borderRadius: 6,
+    color: 'var(--ink)',
+    outline: 'none',
+    boxSizing: 'border-box',
+  },
+  warn: {
+    fontSize: 11,
+    color: 'var(--ink-faint)',
+    marginTop: 6,
+    fontStyle: 'italic',
+    lineHeight: 1.4,
+  },
+};
 
 // Company access UI styles
 const ua: Record<string, React.CSSProperties> = {
