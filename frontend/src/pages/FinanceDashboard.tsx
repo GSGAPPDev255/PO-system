@@ -210,6 +210,35 @@ export default function FinanceDashboard() {
     );
   }, [invoices, search, companyFilter]);
 
+  // ── Soft duplicate detection ─────────────────────────────────────────────────
+  // Flag any two POs that share a non-null transaction_reference (post-AI),
+  // OR share the same underlying file hash (pre-AI / resent identical PDF).
+  const duplicateIds = useMemo(() => {
+    const byRef = new Map<string, string[]>();
+    const byHash = new Map<string, string[]>();
+    for (const inv of invoices) {
+      const ref = inv.transaction_reference?.trim();
+      if (ref) {
+        const arr = byRef.get(ref) ?? [];
+        arr.push(inv.id);
+        byRef.set(ref, arr);
+      }
+      const hash = (inv as unknown as Record<string, unknown>).invoice_file
+        ? ((inv as unknown as Record<string, unknown>).invoice_file as Record<string, unknown>)?.file_hash as string | null
+        : null;
+      if (hash) {
+        const arr = byHash.get(hash) ?? [];
+        arr.push(inv.id);
+        byHash.set(hash, arr);
+      }
+    }
+    const ids = new Set<string>();
+    for (const [, poIds] of byRef) if (poIds.length > 1) poIds.forEach(id => ids.add(id));
+    for (const [, poIds] of byHash) if (poIds.length > 1) poIds.forEach(id => ids.add(id));
+    return ids;
+  }, [invoices]);
+  // ─────────────────────────────────────────────────────────────────────────────
+
   const allSelected = filtered.length > 0 && filtered.every(i => selectedIds.has(i.id));
   const someSelected = selectedIds.size > 0;
 
@@ -469,7 +498,14 @@ export default function FinanceDashboard() {
                       <td style={{ ...styles.td, ...styles.mono }}>{inv.transaction_reference ?? <span style={styles.muted}>—</span>}</td>
                       <td style={styles.td}>{inv.transaction_date ? fmtDate(inv.transaction_date) : <span style={styles.muted}>—</span>}</td>
                       <td style={{ ...styles.td, ...styles.moneyCell }}>{fmtMoney(inv.gross_amount)}</td>
-                      <td style={styles.td}><StatusBadge status={inv.status} /></td>
+                      <td style={styles.td}>
+                        <StatusBadge status={inv.status} />
+                        {duplicateIds.has(inv.id) && (
+                          <span style={styles.dupeBadge} title="Another PO exists with the same invoice file or reference number">
+                            ⚠ Duplicate
+                          </span>
+                        )}
+                      </td>
                       <td style={styles.td}>{approver?.display_name ? <span style={styles.approverName}>{approver.display_name}</span> : <span style={styles.unassigned}>— Unassigned</span>}</td>
                       <td style={{ ...styles.td, color: 'var(--ink-muted)' }}>
                         {fmtDate(inv.email_date ?? inv.created_at)}
@@ -792,6 +828,19 @@ const styles: Record<string, React.CSSProperties> = {
     textAlign: 'right',
     fontVariantNumeric: 'tabular-nums',
     color: 'var(--ink)',
+  },
+  dupeBadge: {
+    display: 'inline-block',
+    marginTop: 5,
+    fontSize: 10,
+    fontWeight: 600,
+    letterSpacing: '0.04em',
+    padding: '2px 7px',
+    borderRadius: 20,
+    background: 'rgba(244, 162, 97, 0.15)',
+    color: '#c47a1e',
+    border: '1px solid rgba(244, 162, 97, 0.4)',
+    whiteSpace: 'nowrap' as const,
   },
   approverName: { color: 'var(--ink)', fontWeight: 500 },
   unassigned: {

@@ -10,7 +10,7 @@ export function useInvoices(statusFilter?: InvoiceStatus | InvoiceStatus[]) {
         .from('purchase_orders')
         .select(`
           *,
-          invoice_file:invoice_files!invoice_file_id (id, original_name, storage_path, mime_type, email_from, email_date),
+          invoice_file:invoice_files!invoice_file_id (id, original_name, storage_path, mime_type, email_from, email_date, file_hash),
           approver:approvers!assigned_approver_id (id, email, display_name, department),
           second_approver:approvers!second_approver_id (id, email, display_name)
         `)
@@ -39,7 +39,7 @@ export function useInvoice(id: string) {
         .from('purchase_orders')
         .select(`
           *,
-          invoice_file:invoice_files!invoice_file_id (id, original_name, storage_path, mime_type, email_from, email_date),
+          invoice_file:invoice_files!invoice_file_id (id, original_name, storage_path, mime_type, email_from, email_date, file_hash),
           approver:approvers!assigned_approver_id (id, email, display_name, department),
           second_approver:approvers!second_approver_id (id, email, display_name)
         `)

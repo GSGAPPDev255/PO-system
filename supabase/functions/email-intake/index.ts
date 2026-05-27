@@ -100,6 +100,14 @@ function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, '').substring(0, 3000);
 }
 
+/** SHA-256 hex digest of raw bytes — used for content-based duplicate detection */
+async function sha256hex(bytes: Uint8Array): Promise<string> {
+  const buf = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(buf))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
 async function markMessageRead(mailbox: string, messageId: string): Promise<void> {
   try {
     const token = await getGraphToken();
@@ -262,23 +270,55 @@ async function processMailbox(
       }
 
       for (const attachment of [bestAttachment]) {
+        // Decode bytes first — needed for both hash check and storage upload
+        const bytes = Uint8Array.from(atob(attachment.contentBytes), (c) => c.charCodeAt(0));
+        const fileHash = await sha256hex(bytes);
+
+        // ── Hash-based duplicate detection ──────────────────────────────────────
+        // Catches identical files regardless of filename, sender, or subject.
+        // Covers: resent invoices, forwarded invoices, chaser with same PDF attached.
         const { data: existingFile } = await supabaseAdmin
-          .from('invoice_files').select('id')
-          .eq('original_name', attachment.name)
-          .eq('email_from', message.from.emailAddress.address)
-          .limit(1).maybeSingle();
+          .from('invoice_files')
+          .select('id')
+          .eq('file_hash', fileHash)
+          .limit(1)
+          .maybeSingle();
 
         if (existingFile) {
+          // Find the PO linked to this file so we can log the chase against it
+          const { data: existingPO } = await supabaseAdmin
+            .from('purchase_orders')
+            .select('id')
+            .eq('invoice_file_id', existingFile.id)
+            .limit(1)
+            .maybeSingle();
+
+          await supabaseAdmin.from('audit_log').insert({
+            purchase_order_id: existingPO?.id ?? null,
+            action: 'duplicate_received',
+            actor_email: 'system@email-intake',
+            actor_display: 'Email Intake (System)',
+            new_values: {
+              email_from: message.from.emailAddress.address,
+              email_subject: message.subject,
+            },
+            metadata: {
+              type: 'duplicate_attachment',
+              duplicate_of_file_id: existingFile.id,
+              file_hash: fileHash,
+            },
+          });
+
           results.duplicates++;
           continue;
         }
+        // ────────────────────────────────────────────────────────────────────────
 
         const poId = crypto.randomUUID();
         const year = new Date().getFullYear();
         const month = String(new Date().getMonth() + 1).padStart(2, '0');
         const storagePath = `${year}/${month}/${poId}/${attachment.name}`;
 
-        const bytes = Uint8Array.from(atob(attachment.contentBytes), (c) => c.charCodeAt(0));
         const { error: storageError } = await supabaseAdmin.storage
           .from('invoices').upload(storagePath, bytes, { contentType: attachment.contentType, upsert: false });
 
@@ -293,6 +333,7 @@ async function processMailbox(
             original_name: attachment.name, mime_type: attachment.contentType,
             file_size_bytes: attachment.size, email_from: message.from.emailAddress.address,
             email_date: message.receivedDateTime, email_subject: message.subject,
+            file_hash: fileHash,
           }).select().single();
 
         if (fileError || !fileRecord) {
