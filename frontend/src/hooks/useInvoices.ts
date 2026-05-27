@@ -84,6 +84,25 @@ export function useVatLines(poId: string) {
   });
 }
 
+/** Fetch all nominal lines for multiple POs at once — used by ExportManagement. */
+export function useNominalLinesBulk(poIds: string[]) {
+  const key = [...poIds].sort().join(',');
+  return useQuery({
+    queryKey: ['nominal-lines-bulk', key],
+    queryFn: async () => {
+      if (!poIds.length) return [] as NominalLine[];
+      const { data, error } = await supabase
+        .from('nominal_lines')
+        .select('*')
+        .in('purchase_order_id', poIds)
+        .order('line_number');
+      if (error) throw error;
+      return data as NominalLine[];
+    },
+    enabled: poIds.length > 0,
+  });
+}
+
 export function useOcrExtraction(poId: string) {
   return useQuery({
     queryKey: ['ocr', poId],
