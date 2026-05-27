@@ -109,6 +109,9 @@ export interface PurchaseOrder {
   exported_at: string | null;
   exported_by_id: string | null;
   csv_export_id: string | null;
+  email_subject: string | null;
+  email_from: string | null;
+  email_date: string | null;
   created_at: string;
   created_by_id: string | null;
   updated_at: string;

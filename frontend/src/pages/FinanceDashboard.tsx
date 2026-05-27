@@ -33,6 +33,20 @@ function fmtMoney(amount: number | null | undefined): string {
   return `£${Number(amount).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+/** Extract a readable sender label from "Display Name <email@domain>" or plain email */
+function fmtFrom(raw: string | null | undefined): string {
+  if (!raw) return '';
+  const match = raw.match(/^(.+?)\s*<[^>]+>$/);
+  if (match) return match[1].trim();
+  return raw.length > 40 ? raw.slice(0, 38) + '…' : raw;
+}
+
+/** Truncate a string with ellipsis */
+function truncate(str: string | null | undefined, max: number): string {
+  if (!str) return '';
+  return str.length > max ? str.slice(0, max - 1) + '…' : str;
+}
+
 export default function FinanceDashboard() {
   const [statusFilter, setStatusFilter] = useState<InvoiceStatus | 'all'>('all');
   const [companyFilter, setCompanyFilter] = useState<string>('all');
@@ -405,7 +419,7 @@ export default function FinanceDashboard() {
                   <th style={{ ...styles.th, textAlign: 'right' }}>Gross</th>
                   <th style={styles.th}>Status</th>
                   <th style={styles.th}>Approver</th>
-                  <th style={styles.th}>Received</th>
+                  <th style={styles.th}>Email Date</th>
                   <th style={{ ...styles.th, textAlign: 'right' }}>Actions</th>
                 </tr>
               </thead>
@@ -440,6 +454,14 @@ export default function FinanceDashboard() {
                       <td style={styles.td}>
                         <div style={styles.supplierName}>{inv.supplier_name ?? '—'}</div>
                         {inv.account_number && <div style={styles.accountNum}>{inv.account_number}</div>}
+                        {inv.email_subject && (
+                          <div style={styles.emailSubject} title={inv.email_subject}>
+                            {truncate(inv.email_subject, 56)}
+                          </div>
+                        )}
+                        {inv.email_from && (
+                          <div style={styles.emailFrom}>{fmtFrom(inv.email_from)}</div>
+                        )}
                       </td>
                       <td style={styles.td}>
                         <CompanyBadge company={(inv as unknown as Record<string, unknown>).company as string | null} />
@@ -449,7 +471,14 @@ export default function FinanceDashboard() {
                       <td style={{ ...styles.td, ...styles.moneyCell }}>{fmtMoney(inv.gross_amount)}</td>
                       <td style={styles.td}><StatusBadge status={inv.status} /></td>
                       <td style={styles.td}>{approver?.display_name ? <span style={styles.approverName}>{approver.display_name}</span> : <span style={styles.unassigned}>— Unassigned</span>}</td>
-                      <td style={{ ...styles.td, color: 'var(--ink-muted)' }}>{fmtDate(inv.created_at)}</td>
+                      <td style={{ ...styles.td, color: 'var(--ink-muted)' }}>
+                        {fmtDate(inv.email_date ?? inv.created_at)}
+                        {inv.email_date && (
+                          <div style={{ fontSize: 10, color: 'var(--ink-faint)', marginTop: 2, fontStyle: 'italic' }}>
+                            received
+                          </div>
+                        )}
+                      </td>
                       <td style={{ ...styles.td, textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
                         <button style={styles.rowBtnPrimary} onClick={() => navigate(`/invoices/${inv.id}`)}>Review <span style={{ opacity: 0.6 }}>→</span></button>
                         <button style={styles.rowBtn} onClick={() => navigate(`/audit/${inv.id}`)}>Audit</button>
@@ -480,6 +509,8 @@ export default function FinanceDashboard() {
                     <div>
                       <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--ink)' }}>{inv.supplier_name ?? '—'}</div>
                       {inv.transaction_reference && <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ink-faint)', marginTop: 2 }}>{inv.transaction_reference}</div>}
+                      {inv.email_subject && <div style={{ fontSize: 11, color: 'var(--ink-muted)', marginTop: 3, fontStyle: 'italic' }}>{truncate(inv.email_subject, 50)}</div>}
+                      {inv.email_from && <div style={{ fontSize: 10, color: 'var(--ink-faint)', marginTop: 1 }}>{fmtFrom(inv.email_from)}</div>}
                     </div>
                     <div style={{ textAlign: 'right', flexShrink: 0 }}>
                       <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 15, color: 'var(--ink)' }}>{fmtMoney(inv.gross_amount)}</div>
@@ -734,6 +765,20 @@ const styles: Record<string, React.CSSProperties> = {
     color: 'var(--ink-faint)',
     marginTop: 3,
     letterSpacing: '0.02em',
+  },
+  emailSubject: {
+    fontSize: 11.5,
+    color: 'var(--ink-muted)',
+    marginTop: 4,
+    fontStyle: 'italic',
+    fontFamily: 'var(--font-display)',
+    lineHeight: 1.3,
+  },
+  emailFrom: {
+    fontSize: 10.5,
+    color: 'var(--ink-faint)',
+    marginTop: 2,
+    letterSpacing: '0.01em',
   },
   mono: {
     fontFamily: 'var(--font-mono)',
