@@ -39,9 +39,13 @@ function setCachedProfile(p: Profile | null) {
 function AuthCallback({ profile }: { profile: Profile | null | undefined }) {
   const location = useLocation();
 
-  // Parse error params from the URL hash (#error=...&error_description=...)
-  const hashParams = new URLSearchParams(location.hash.replace(/^#/, ''));
-  const authError = hashParams.get('error_description') ?? hashParams.get('error');
+  // Parse error params — Azure AD can return them in the hash (#error=...) OR
+  // as query params (?error=...), so we check both.
+  const hashParams   = new URLSearchParams(location.hash.replace(/^#/, ''));
+  const searchParams = new URLSearchParams(location.search);
+  const authError =
+    hashParams.get('error_description')   ?? hashParams.get('error') ??
+    searchParams.get('error_description') ?? searchParams.get('error');
 
   // Auth failed at provider level — send back to login with an error message.
   if (authError) {
@@ -81,6 +85,27 @@ export default function App() {
   });
 
   const navigate = useNavigate();
+
+  // ── Back-forward cache (bfcache) guard ───────────────────────────────────────
+  // When the user signs out and the Azure logout page redirects them away, then
+  // presses the browser's back button, some browsers restore the old page from
+  // bfcache — React state (including `profile`) is still the signed-in state.
+  // `pageshow` with `e.persisted=true` fires on bfcache restoration; we re-check
+  // the session and clear state if the token is gone.
+  useEffect(() => {
+    const handlePageShow = (e: PageTransitionEvent) => {
+      if (!e.persisted) return;
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (!session) {
+          try { localStorage.removeItem('posystem_profile_cache'); } catch { /* ignore */ }
+          setProfile(null);
+        }
+      });
+    };
+    window.addEventListener('pageshow', handlePageShow);
+    return () => window.removeEventListener('pageshow', handlePageShow);
+  }, []);
+  // ─────────────────────────────────────────────────────────────────────────────
 
   useEffect(() => {
     let cancelled = false;
@@ -144,11 +169,11 @@ export default function App() {
       },
     );
 
-    // Fallback: if profile is still undefined (no cache, auth slow) after 12s,
+    // Fallback: if profile is still undefined (no cache, auth slow) after 6s,
     // clear the spinner rather than hanging forever.
     const timeout = setTimeout(() => {
       if (!cancelled) setProfile((prev) => (prev === undefined ? null : prev));
-    }, 12000);
+    }, 6000);
 
     return () => {
       cancelled = true;

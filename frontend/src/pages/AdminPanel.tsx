@@ -6,7 +6,7 @@
  *  4. System     — view function health, trigger email-intake manually
  */
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import type { Profile, UserRole } from '../lib/supabase';
 
@@ -125,6 +125,7 @@ function UsersTab() {
   const [galQuery, setGalQuery]       = useState('');
   const [galResults, setGalResults]   = useState<GalUser[]>([]);
   const [galSearching, setGalSearching] = useState(false);
+  const [galError, setGalError]       = useState<string | null>(null);
 
   function flash(m: string, type: 'success' | 'error' = 'success') {
     setMsg(m); setMsgType(type);
@@ -277,9 +278,10 @@ function UsersTab() {
 
   // Debounced GAL search
   useEffect(() => {
-    if (galQuery.trim().length < 2) { setGalResults([]); return; }
+    if (galQuery.trim().length < 2) { setGalResults([]); setGalError(null); return; }
     const timer = setTimeout(async () => {
       setGalSearching(true);
+      setGalError(null);
       try {
         const { data, error } = await supabase.functions.invoke('gal-search', {
           body: { query: galQuery.trim() },
@@ -287,15 +289,15 @@ function UsersTab() {
         if (!error && data?.users) {
           setGalResults(data.users as GalUser[]);
         } else {
-          // Surface the real Graph error to the console so we can see what's
-          // actually blocking the search (token / permissions / etc.)
-          if (error) console.error('[GAL search] invoke error:', error);
-          if (data?.error) console.error('[GAL search] graph error:', data);
           setGalResults([]);
+          // Build a readable error for the admin to act on
+          const detail = data?.detail ?? data?.fallback_error ?? error?.message ?? 'Unknown error';
+          const hint = data?.hint ?? '';
+          setGalError(`Directory search failed: ${detail}${hint ? ` — ${hint}` : ''}`);
         }
       } catch (e) {
-        console.error('[GAL search] exception:', e);
         setGalResults([]);
+        setGalError(`Directory search exception: ${(e as Error).message}`);
       }
       setGalSearching(false);
     }, 350);
@@ -411,9 +413,20 @@ function UsersTab() {
                 ))}
               </div>
             )}
-            {galQuery.trim().length >= 2 && !galSearching && galResults.length === 0 && (
+            {galQuery.trim().length >= 2 && !galSearching && galResults.length === 0 && !galError && (
               <div style={{ fontSize: 11.5, color: 'var(--ink-faint)', marginTop: 6, fontStyle: 'italic' }}>
                 No results found — fill in manually below.
+              </div>
+            )}
+            {galError && (
+              <div style={{ marginTop: 8, padding: '8px 12px', background: 'rgba(160,49,53,0.07)', border: '1px solid rgba(160,49,53,0.22)', borderRadius: 6, fontSize: 11.5, color: 'var(--danger)', lineHeight: 1.5 }}>
+                <strong>⚠ Azure AD directory search unavailable.</strong><br />
+                {galError.includes('AADSTS7000215') || galError.includes('invalid_client') || galError.includes('client secret')
+                  ? 'The Azure AD client secret has expired. Ask your IT admin to generate a new secret in the Azure portal (App registrations → Certificates & secrets) and update the AZURE_CLIENT_SECRET in Supabase Edge Function secrets.'
+                  : galError.includes('Authorization_RequestDenied') || galError.includes('insufficient_scope')
+                    ? 'The Azure AD app is missing the required Graph API permission (User.ReadBasic.All). Ask IT to grant admin consent in the Azure portal.'
+                    : galError
+                }
               </div>
             )}
           </div>
@@ -487,7 +500,7 @@ function UsersTab() {
               const isExpanded = expandedAccess === p.id;
               const isSelf = p.id === currentUserId;
               return (
-                <>
+                <React.Fragment key={p.id}>
                   <tr key={p.id} style={{ ...s.row, ...(idx % 2 === 1 ? s.rowAlt : {}), opacity: isArchived ? 0.5 : 1 }}>
                     <td style={s.td}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -627,7 +640,7 @@ function UsersTab() {
                       </td>
                     </tr>
                   )}
-                </>
+                </React.Fragment>
               );
             })}
           </tbody>
@@ -953,6 +966,7 @@ function ApproversTab() {
   const [galQuery, setGalQuery]           = useState('');
   const [galResults, setGalResults]       = useState<GalUser[]>([]);
   const [galSearching, setGalSearching]   = useState(false);
+  const [galError, setGalError]           = useState<string | null>(null);
 
   function flash(m: string, type: 'success' | 'error' = 'success') {
     setMsg(m); setMsgType(type);
@@ -979,9 +993,10 @@ function ApproversTab() {
 
   // Debounced GAL search
   useEffect(() => {
-    if (galQuery.trim().length < 2) { setGalResults([]); return; }
+    if (galQuery.trim().length < 2) { setGalResults([]); setGalError(null); return; }
     const timer = setTimeout(async () => {
       setGalSearching(true);
+      setGalError(null);
       try {
         const { data, error } = await supabase.functions.invoke('gal-search', {
           body: { query: galQuery.trim() },
@@ -989,15 +1004,14 @@ function ApproversTab() {
         if (!error && data?.users) {
           setGalResults(data.users as GalUser[]);
         } else {
-          // Surface the real Graph error to the console so we can see what's
-          // actually blocking the search (token / permissions / etc.)
-          if (error) console.error('[GAL search] invoke error:', error);
-          if (data?.error) console.error('[GAL search] graph error:', data);
           setGalResults([]);
+          const detail = data?.detail ?? data?.fallback_error ?? error?.message ?? 'Unknown error';
+          const hint = data?.hint ?? '';
+          setGalError(`Directory search failed: ${detail}${hint ? ` — ${hint}` : ''}`);
         }
       } catch (e) {
-        console.error('[GAL search] exception:', e);
         setGalResults([]);
+        setGalError(`Directory search exception: ${(e as Error).message}`);
       }
       setGalSearching(false);
     }, 350);
@@ -1107,9 +1121,20 @@ function ApproversTab() {
                 ))}
               </div>
             )}
-            {galQuery.trim().length >= 2 && !galSearching && galResults.length === 0 && (
+            {galQuery.trim().length >= 2 && !galSearching && galResults.length === 0 && !galError && (
               <div style={{ fontSize: 11.5, color: 'var(--ink-faint)', marginTop: 6, fontStyle: 'italic' }}>
                 No results — fill in manually below.
+              </div>
+            )}
+            {galError && (
+              <div style={{ marginTop: 8, padding: '8px 12px', background: 'rgba(160,49,53,0.07)', border: '1px solid rgba(160,49,53,0.22)', borderRadius: 6, fontSize: 11.5, color: 'var(--danger)', lineHeight: 1.5 }}>
+                <strong>⚠ Azure AD directory search unavailable.</strong><br />
+                {galError.includes('AADSTS7000215') || galError.includes('invalid_client') || galError.includes('client secret')
+                  ? 'The Azure AD client secret has expired. Ask your IT admin to generate a new secret in the Azure portal (App registrations → Certificates & secrets) and update the AZURE_CLIENT_SECRET in Supabase Edge Function secrets.'
+                  : galError.includes('Authorization_RequestDenied') || galError.includes('insufficient_scope')
+                    ? 'The Azure AD app is missing the required Graph API permission (User.ReadBasic.All). Ask IT to grant admin consent in the Azure portal.'
+                    : galError
+                }
               </div>
             )}
           </div>
@@ -1415,6 +1440,15 @@ interface Mailbox {
   email: string;
   label: string;
   is_active: boolean;
+  folder_id:   string | null;
+  folder_name: string | null;
+}
+
+interface MailFolder {
+  id: string | null;
+  displayName: string;
+  unreadItemCount: number;
+  totalItemCount: number;
 }
 
 function CompaniesTab() {
@@ -1430,6 +1464,13 @@ function CompaniesTab() {
   const [toggling, setToggling]         = useState<string | null>(null);
   const [msg, setMsg]                   = useState('');
   const [msgType, setMsgType]           = useState<'success' | 'error'>('success');
+
+  // Folder picker state
+  const [folderPickerFor, setFolderPickerFor] = useState<string | null>(null); // mailbox.id
+  const [foldersList, setFoldersList]         = useState<MailFolder[]>([]);
+  const [foldersLoading, setFoldersLoading]   = useState(false);
+  const [foldersError, setFoldersError]       = useState<string | null>(null);
+  const [savingFolder, setSavingFolder]       = useState<string | null>(null);
 
   function flash(m: string, type: 'success' | 'error' = 'success') {
     setMsg(m); setMsgType(type);
@@ -1499,6 +1540,39 @@ function CompaniesTab() {
       await load();
     }
     setSaving(false);
+  }
+
+  async function openFolderPicker(m: Mailbox) {
+    if (folderPickerFor === m.id) { setFolderPickerFor(null); return; }
+    setFolderPickerFor(m.id);
+    setFoldersError(null);
+    setFoldersList([]);
+    setFoldersLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('list-mail-folders', {
+        body: { mailbox: m.email },
+      });
+      if (error) throw new Error(error.message);
+      if (data?.error) throw new Error(data.error + (data.hint ? ` — ${data.hint}` : ''));
+      setFoldersList((data.folders ?? []) as MailFolder[]);
+    } catch (err) {
+      setFoldersError((err as Error).message);
+    } finally {
+      setFoldersLoading(false);
+    }
+  }
+
+  async function saveMailboxFolder(m: Mailbox, folder: MailFolder) {
+    setSavingFolder(m.id);
+    const { error } = await supabase
+      .from('mailboxes')
+      .update({ folder_id: folder.id, folder_name: folder.id ? folder.displayName : null })
+      .eq('id', m.id);
+    if (error) { flash('Failed to save folder: ' + error.message, 'error'); }
+    else { flash(`${m.email} → folder set to "${folder.displayName}".`); }
+    setSavingFolder(null);
+    setFolderPickerFor(null);
+    await load();
   }
 
   async function toggleMailbox(m: Mailbox) {
@@ -1665,34 +1739,108 @@ function CompaniesTab() {
                         <tr>
                           <th style={co.mth}>Email</th>
                           <th style={co.mth}>Label</th>
+                          <th style={co.mth}>Folder</th>
                           <th style={co.mth}>Status</th>
                           <th style={{ ...co.mth, textAlign: 'right' }}>Actions</th>
                         </tr>
                       </thead>
                       <tbody>
                         {cMailboxes.map((m, idx) => (
-                          <tr key={m.id} style={{ ...s.row, ...(idx % 2 === 1 ? s.rowAlt : {}), opacity: m.is_active ? 1 : 0.5 }}>
-                            <td style={{ ...s.td, ...s.mono, fontSize: 12.5 }}>{m.email}</td>
-                            <td style={{ ...s.td, fontSize: 13 }}>{m.label}</td>
-                            <td style={s.td}>
-                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                                <span style={{ ...s.statusDot, background: m.is_active ? 'var(--success)' : 'var(--ink-faint)' }} />
-                                <span style={{ fontSize: 11.5 }}>{m.is_active ? 'Active' : 'Paused'}</span>
-                              </span>
-                            </td>
-                            <td style={{ ...s.td, textAlign: 'right' }}>
-                              <div style={{ display: 'inline-flex', gap: 6 }}>
-                                <button className="btn" style={s.btnSecondary} disabled={toggling === m.id}
-                                  onClick={() => toggleMailbox(m)}>
-                                  {toggling === m.id ? '…' : m.is_active ? 'Pause' : 'Resume'}
-                                </button>
-                                <button className="btn" style={s.btnDanger} disabled={toggling === m.id}
-                                  onClick={() => deleteMailbox(m)}>
-                                  Remove
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
+                          <React.Fragment key={m.id}>
+                            <tr style={{ ...s.row, ...(idx % 2 === 1 ? s.rowAlt : {}), opacity: m.is_active ? 1 : 0.5 }}>
+                              <td style={{ ...s.td, ...s.mono, fontSize: 12.5 }}>{m.email}</td>
+                              <td style={{ ...s.td, fontSize: 13 }}>{m.label}</td>
+                              {/* Folder column */}
+                              <td style={s.td}>
+                                <div style={{ position: 'relative', display: 'inline-block' }}>
+                                  <button
+                                    style={co.folderBtn}
+                                    onClick={() => openFolderPicker(m)}
+                                    title="Click to change the folder email-intake reads from"
+                                  >
+                                    <span style={co.folderIcon}>📁</span>
+                                    <span style={co.folderName}>{m.folder_name ?? 'Inbox'}</span>
+                                    <span style={{ fontSize: 9, opacity: 0.5 }}>▾</span>
+                                  </button>
+                                </div>
+                              </td>
+                              <td style={s.td}>
+                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                  <span style={{ ...s.statusDot, background: m.is_active ? 'var(--success)' : 'var(--ink-faint)' }} />
+                                  <span style={{ fontSize: 11.5 }}>{m.is_active ? 'Active' : 'Paused'}</span>
+                                </span>
+                              </td>
+                              <td style={{ ...s.td, textAlign: 'right' }}>
+                                <div style={{ display: 'inline-flex', gap: 6 }}>
+                                  <button className="btn" style={s.btnSecondary} disabled={toggling === m.id}
+                                    onClick={() => toggleMailbox(m)}>
+                                    {toggling === m.id ? '…' : m.is_active ? 'Pause' : 'Resume'}
+                                  </button>
+                                  <button className="btn" style={s.btnDanger} disabled={toggling === m.id}
+                                    onClick={() => deleteMailbox(m)}>
+                                    Remove
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                            {/* Folder picker dropdown row */}
+                            {folderPickerFor === m.id && (
+                              <tr key={`${m.id}-folder-picker`}>
+                                <td colSpan={5} style={{ padding: '0 0 6px', background: 'var(--paper)' }}>
+                                  <div style={co.folderPickerWrap}>
+                                    <div style={co.folderPickerHeader}>
+                                      <span style={co.folderPickerTitle}>
+                                        Choose inbox folder for <strong>{m.email}</strong>
+                                      </span>
+                                      <button style={co.folderPickerClose} onClick={() => setFolderPickerFor(null)}>✕</button>
+                                    </div>
+
+                                    {foldersLoading && (
+                                      <div style={co.folderPickerMsg}>Loading folders from Microsoft 365…</div>
+                                    )}
+
+                                    {foldersError && (
+                                      <div style={co.folderPickerErr}>
+                                        <strong>Error:</strong> {foldersError}
+                                      </div>
+                                    )}
+
+                                    {!foldersLoading && !foldersError && foldersList.length > 0 && (
+                                      <div style={co.folderList}>
+                                        {foldersList.map((f) => {
+                                          const isSelected = f.id === null
+                                            ? !m.folder_id
+                                            : m.folder_id === f.id;
+                                          return (
+                                            <button
+                                              key={f.id ?? '__inbox__'}
+                                              style={{
+                                                ...co.folderOption,
+                                                ...(isSelected ? co.folderOptionActive : {}),
+                                              }}
+                                              disabled={savingFolder === m.id}
+                                              onClick={() => saveMailboxFolder(m, f)}
+                                            >
+                                              <span style={{ fontSize: 14 }}>{f.id === null ? '📥' : '📁'}</span>
+                                              <span style={co.folderOptionName}>{f.displayName}</span>
+                                              {f.id !== null && (
+                                                <span style={co.folderOptionCount}>
+                                                  {f.unreadItemCount > 0
+                                                    ? `${f.unreadItemCount} unread`
+                                                    : `${f.totalItemCount} total`}
+                                                </span>
+                                              )}
+                                              {isSelected && <span style={co.folderOptionCheck}>✓ Current</span>}
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
                         ))}
                       </tbody>
                     </table>
@@ -1763,6 +1911,104 @@ const co: Record<string, React.CSSProperties> = {
     letterSpacing: '0.14em',
     borderBottom: '1px solid var(--line)',
     background: 'var(--paper)',
+  },
+
+  // ── Folder picker ────────────────────────────────────────────────────────
+  folderBtn: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 5,
+    padding: '4px 9px',
+    fontSize: 11.5,
+    background: 'rgba(0,180,216,0.07)',
+    border: '1px solid rgba(0,180,216,0.20)',
+    borderRadius: 6,
+    color: 'var(--accent)',
+    cursor: 'pointer',
+    fontFamily: 'var(--font-ui)',
+    whiteSpace: 'nowrap' as const,
+    transition: 'background 0.12s',
+  },
+  folderIcon: { fontSize: 12 },
+  folderName: { fontWeight: 500, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' },
+
+  folderPickerWrap: {
+    margin: '2px 16px 10px',
+    background: 'var(--paper-bright)',
+    border: '1px solid var(--accent)',
+    borderRadius: 10,
+    boxShadow: '0 6px 24px rgba(0,180,216,0.12)',
+    overflow: 'hidden',
+  },
+  folderPickerHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '10px 14px',
+    borderBottom: '1px solid var(--line)',
+    background: 'rgba(0,180,216,0.04)',
+  },
+  folderPickerTitle: {
+    fontSize: 12,
+    color: 'var(--ink-muted)',
+  },
+  folderPickerClose: {
+    background: 'none',
+    border: 'none',
+    fontSize: 13,
+    color: 'var(--ink-faint)',
+    cursor: 'pointer',
+    padding: '0 2px',
+  },
+  folderPickerMsg: {
+    padding: '14px 16px',
+    fontSize: 12.5,
+    color: 'var(--ink-muted)',
+    fontStyle: 'italic',
+  },
+  folderPickerErr: {
+    padding: '12px 16px',
+    fontSize: 12,
+    color: 'var(--danger)',
+    background: 'rgba(244,63,94,0.06)',
+  },
+  folderList: {
+    display: 'flex',
+    flexWrap: 'wrap' as const,
+    gap: 6,
+    padding: '12px 14px',
+  },
+  folderOption: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 7,
+    padding: '8px 13px',
+    fontSize: 12.5,
+    background: 'var(--paper)',
+    border: '1px solid var(--line)',
+    borderRadius: 8,
+    cursor: 'pointer',
+    color: 'var(--ink)',
+    transition: 'all 0.12s',
+    fontFamily: 'var(--font-ui)',
+  },
+  folderOptionActive: {
+    background: 'rgba(0,180,216,0.08)',
+    borderColor: 'rgba(0,180,216,0.40)',
+    color: 'var(--accent)',
+  },
+  folderOptionName: { fontWeight: 500 },
+  folderOptionCount: {
+    fontSize: 10,
+    color: 'var(--ink-faint)',
+    fontFamily: 'var(--font-mono)',
+  },
+  folderOptionCheck: {
+    fontSize: 10,
+    color: 'var(--accent)',
+    fontWeight: 700,
+    fontFamily: 'var(--font-mono)',
+    marginLeft: 2,
   },
 };
 
@@ -1956,6 +2202,8 @@ function SystemTab() {
   const [sendingDigest, setSendingDigest]       = useState(false);
   const [intakeStatus, setIntakeStatus] = useState<'idle' | 'checking' | 'ok' | 'error'>('idle');
   const [intakeDetail, setIntakeDetail] = useState('');
+  const [diagRunning, setDiagRunning]   = useState(false);
+  const [diagResult, setDiagResult]     = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -1973,6 +2221,20 @@ function SystemTab() {
       });
     })();
   }, []);
+
+  async function runDiagnostics() {
+    setDiagRunning(true);
+    setDiagResult(null);
+    try {
+      const { data, error } = await supabase.functions.invoke('diagnose-graph', { method: 'POST' });
+      if (error) { setDiagResult('Error: ' + error.message); return; }
+      setDiagResult(typeof data === 'object' ? JSON.stringify(data, null, 2) : String(data));
+    } catch (e) {
+      setDiagResult('Failed: ' + (e as Error).message);
+    } finally {
+      setDiagRunning(false);
+    }
+  }
 
   async function checkEmailIntake() {
     setIntakeStatus('checking');
@@ -2122,6 +2384,32 @@ function SystemTab() {
             color: intakeStatus === 'ok' ? 'var(--success)' : 'var(--danger)',
           }}>
             <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{intakeDetail}</pre>
+          </div>
+        )}
+      </div>
+
+      {/* Azure AD / Graph diagnostics */}
+      <div style={{ ...s.card, marginBottom: 12 }}>
+        <div style={{ ...sy.healthRow, flexWrap: 'wrap' as const, gap: 12 }}>
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <div style={sy.healthKicker}>§ Azure diagnostics</div>
+            <div style={sy.healthTitle}>Test Graph credentials</div>
+            <div style={sy.healthSub}>
+              Checks AZURE_TENANT_ID, AZURE_CLIENT_ID &amp; AZURE_CLIENT_SECRET and reports exactly what's wrong.
+            </div>
+          </div>
+          <button
+            className="btn"
+            style={s.btnSecondary}
+            disabled={diagRunning}
+            onClick={runDiagnostics}
+          >
+            {diagRunning ? '⏳ Running…' : '🔍 Run diagnostics'}
+          </button>
+        </div>
+        {diagResult && (
+          <div style={{ ...sy.healthResult, marginTop: 0, borderColor: 'rgba(123,97,255,0.2)', background: 'rgba(123,97,255,0.04)' }}>
+            <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all', fontSize: 11.5, color: 'var(--ink)' }}>{diagResult}</pre>
           </div>
         )}
       </div>
