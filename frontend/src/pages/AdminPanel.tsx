@@ -10,7 +10,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import type { Profile, UserRole } from '../lib/supabase';
 
-type Tab = 'users' | 'approvers' | 'suppliers' | 'companies' | 'alerts' | 'system';
+type Tab = 'users' | 'approvers' | 'suppliers' | 'nominals' | 'companies' | 'alerts' | 'system';
 
 interface SystemSetting { key: string; value: string; description: string }
 
@@ -36,9 +36,10 @@ const TAB_META: { id: Tab; number: string; label: string }[] = [
   { id: 'users',     number: '01', label: 'Users' },
   { id: 'approvers', number: '02', label: 'Approvers' },
   { id: 'suppliers', number: '03', label: 'Suppliers' },
-  { id: 'companies', number: '04', label: 'Companies' },
-  { id: 'alerts',    number: '05', label: 'Alerts' },
-  { id: 'system',    number: '06', label: 'System' },
+  { id: 'nominals',  number: '04', label: 'Nominals' },
+  { id: 'companies', number: '05', label: 'Companies' },
+  { id: 'alerts',    number: '06', label: 'Alerts' },
+  { id: 'system',    number: '07', label: 'System' },
 ];
 
 export default function AdminPanel() {
@@ -81,6 +82,7 @@ export default function AdminPanel() {
         {tab === 'users'     && <UsersTab />}
         {tab === 'approvers' && <ApproversTab />}
         {tab === 'suppliers' && <SuppliersTab />}
+        {tab === 'nominals'  && <NominalsTab />}
         {tab === 'companies' && <CompaniesTab />}
         {tab === 'alerts'    && <AlertsTab />}
         {tab === 'system'    && <SystemTab />}
@@ -1274,13 +1276,19 @@ interface SupplierRow {
   is_active: boolean;
 }
 
+const EMPTY_SUPPLIER = { code: '', name: '', short_name: '', payment_group: '' };
+const PAYMENT_GROUPS = ['', 'bacs', 'cheque', 'direct_debit', 'card', 'cash'];
+
 function SuppliersTab() {
-  const [suppliers, setSuppliers] = useState<SupplierRow[]>([]);
-  const [search, setSearch]       = useState('');
-  const [loading, setLoading]     = useState(true);
-  const [deleting, setDeleting]   = useState<string | null>(null);
-  const [msg, setMsg]             = useState('');
-  const [msgType, setMsgType]     = useState<'success' | 'error'>('success');
+  const [suppliers, setSuppliers]   = useState<SupplierRow[]>([]);
+  const [search, setSearch]         = useState('');
+  const [loading, setLoading]       = useState(true);
+  const [acting, setActing]         = useState<string | null>(null);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [addForm, setAddForm]       = useState(EMPTY_SUPPLIER);
+  const [addSaving, setAddSaving]   = useState(false);
+  const [msg, setMsg]               = useState('');
+  const [msgType, setMsgType]       = useState<'success' | 'error'>('success');
 
   function flash(m: string, type: 'success' | 'error' = 'success') {
     setMsg(m); setMsgType(type);
@@ -1300,36 +1308,59 @@ function SuppliersTab() {
 
   useEffect(() => { load(); }, [load]);
 
-  async function toggleActive(s: SupplierRow) {
-    setDeleting(s.code);
-    const { error } = await supabase
-      .from('suppliers')
-      .update({ is_active: !s.is_active })
-      .eq('code', s.code);
+  async function addSupplier() {
+    const { code, name, short_name, payment_group } = addForm;
+    if (!code.trim() || !name.trim()) {
+      flash('Supplier code and name are required.', 'error');
+      return;
+    }
+    setAddSaving(true);
+    const { error } = await supabase.from('suppliers').insert({
+      code:          code.trim().toUpperCase(),
+      name:          name.trim(),
+      short_name:    short_name.trim() || null,
+      payment_group: payment_group || null,
+    });
     if (error) flash('Error: ' + error.message, 'error');
     else {
-      flash(`${s.name} ${s.is_active ? 'deactivated' : 'activated'}.`);
+      flash(`${name.trim()} added.`);
+      setAddForm(EMPTY_SUPPLIER);
+      setShowAddForm(false);
       await load();
     }
-    setDeleting(null);
+    setAddSaving(false);
   }
 
-  async function deleteSupplier(s: SupplierRow) {
-    if (!confirm(`Permanently delete "${s.name}" (${s.code})?\n\nThis won't affect existing invoices — they keep the code as text.`)) return;
-    setDeleting(s.code);
-    const { error } = await supabase.from('suppliers').delete().eq('code', s.code);
+  async function toggleActive(sup: SupplierRow) {
+    setActing(sup.code);
+    const { error } = await supabase
+      .from('suppliers')
+      .update({ is_active: !sup.is_active })
+      .eq('code', sup.code);
     if (error) flash('Error: ' + error.message, 'error');
-    else { flash(`${s.name} deleted.`); await load(); }
-    setDeleting(null);
+    else {
+      flash(`${sup.name} ${sup.is_active ? 'deactivated' : 'activated'}.`);
+      await load();
+    }
+    setActing(null);
+  }
+
+  async function deleteSupplier(sup: SupplierRow) {
+    if (!confirm(`Permanently delete "${sup.name}" (${sup.code})?\n\nThis won't affect existing invoices — they keep the code as text.`)) return;
+    setActing(sup.code);
+    const { error } = await supabase.from('suppliers').delete().eq('code', sup.code);
+    if (error) flash('Error: ' + error.message, 'error');
+    else { flash(`${sup.name} deleted.`); await load(); }
+    setActing(null);
   }
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return suppliers;
-    return suppliers.filter(s =>
-      s.code.toLowerCase().includes(q) ||
-      s.name.toLowerCase().includes(q) ||
-      (s.short_name?.toLowerCase().includes(q) ?? false),
+    return suppliers.filter(sup =>
+      sup.code.toLowerCase().includes(q) ||
+      sup.name.toLowerCase().includes(q) ||
+      (sup.short_name?.toLowerCase().includes(q) ?? false),
     );
   }, [suppliers, search]);
 
@@ -1341,14 +1372,78 @@ function SuppliersTab() {
         msg={msg}
         msgType={msgType}
         actions={
-          <input
-            style={{ ...s.input, width: 260 }}
-            placeholder="Search code or name…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input
+              style={{ ...s.input, width: 220 }}
+              placeholder="Search code or name…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            <button className="btn" style={s.btnPrimary} onClick={() => setShowAddForm((v) => !v)}>
+              {showAddForm ? 'Cancel' : '+ Add supplier'}
+            </button>
+          </div>
         }
       />
+
+      {showAddForm && (
+        <div style={s.addForm} className="animate-rise">
+          <div style={s.addFormKicker}>§ New supplier</div>
+          <div style={s.addFormTitle}>Add a supplier</div>
+          <div style={s.addFormSub}>Enter the Sage 200 supplier account code and name. The code must match exactly what appears in Sage.</div>
+          <div style={{ ...s.formGrid, gridTemplateColumns: 'repeat(4, 1fr)', marginTop: 14 }}>
+            <div style={s.formGroup}>
+              <label style={s.label}>Account code *</label>
+              <input
+                style={{ ...s.input, fontFamily: 'var(--font-mono)' }}
+                value={addForm.code}
+                placeholder="e.g. ACME001"
+                onChange={(e) => setAddForm({ ...addForm, code: e.target.value })}
+              />
+            </div>
+            <div style={s.formGroup}>
+              <label style={s.label}>Supplier name *</label>
+              <input
+                style={s.input}
+                value={addForm.name}
+                placeholder="e.g. Acme Supplies Ltd"
+                onChange={(e) => setAddForm({ ...addForm, name: e.target.value })}
+              />
+            </div>
+            <div style={s.formGroup}>
+              <label style={s.label}>Short name</label>
+              <input
+                style={s.input}
+                value={addForm.short_name}
+                placeholder="e.g. Acme"
+                onChange={(e) => setAddForm({ ...addForm, short_name: e.target.value })}
+              />
+            </div>
+            <div style={s.formGroup}>
+              <label style={s.label}>Payment group</label>
+              <select
+                style={s.input}
+                value={addForm.payment_group}
+                onChange={(e) => setAddForm({ ...addForm, payment_group: e.target.value })}
+              >
+                {PAYMENT_GROUPS.map((pg) => (
+                  <option key={pg} value={pg}>
+                    {pg ? pg.charAt(0).toUpperCase() + pg.slice(1).replace('_', ' ') : '— Standard —'}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button className="btn" style={s.btnPrimary} disabled={addSaving} onClick={addSupplier}>
+              {addSaving ? 'Saving…' : 'Add supplier →'}
+            </button>
+            <button className="btn" style={s.btnSecondary} onClick={() => { setShowAddForm(false); setAddForm(EMPTY_SUPPLIER); }}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       <div style={s.card}>
         {loading ? (
@@ -1393,16 +1488,16 @@ function SuppliersTab() {
                     <div style={{ display: 'inline-flex', gap: 6 }}>
                       <button
                         className="btn"
-                        style={sup.is_active ? s.btnSecondary : s.btnSecondary}
-                        disabled={deleting === sup.code}
+                        style={s.btnSecondary}
+                        disabled={acting === sup.code}
                         onClick={() => toggleActive(sup)}
                       >
-                        {deleting === sup.code ? '…' : sup.is_active ? 'Deactivate' : 'Activate'}
+                        {acting === sup.code ? '…' : sup.is_active ? 'Deactivate' : 'Activate'}
                       </button>
                       <button
                         className="btn"
                         style={s.btnDanger}
-                        disabled={deleting === sup.code}
+                        disabled={acting === sup.code}
                         onClick={() => deleteSupplier(sup)}
                       >
                         Delete
@@ -1416,13 +1511,276 @@ function SuppliersTab() {
         )}
         {!loading && filtered.length === 0 && (
           <div style={s.empty}>
-            {search ? `No suppliers match "${search}".` : 'No suppliers yet.'}
+            {search ? `No suppliers match "${search}".` : 'No suppliers yet. Add one above to get started.'}
           </div>
         )}
       </div>
     </div>
   );
 }
+
+// ─── Nominals Tab ─────────────────────────────────────────────────────────────
+
+interface NominalRow {
+  id: string;
+  code: string;
+  name: string;
+  cost_centre: string | null;
+  department: string | null;
+  is_active: boolean;
+}
+
+const EMPTY_NOMINAL = { code: '', name: '', cost_centre: '', department: '' };
+
+function NominalsTab() {
+  const [nominals, setNominals]       = useState<NominalRow[]>([]);
+  const [search, setSearch]           = useState('');
+  const [loading, setLoading]         = useState(true);
+  const [acting, setActing]           = useState<string | null>(null);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [addForm, setAddForm]         = useState(EMPTY_NOMINAL);
+  const [addSaving, setAddSaving]     = useState(false);
+  const [msg, setMsg]                 = useState('');
+  const [msgType, setMsgType]         = useState<'success' | 'error'>('success');
+
+  function flash(m: string, type: 'success' | 'error' = 'success') {
+    setMsg(m); setMsgType(type);
+    setTimeout(() => setMsg(''), 4000);
+  }
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('nominal_codes')
+      .select('id, code, name, cost_centre, department, is_active')
+      .order('code');
+    if (error) flash('Could not load nominal codes: ' + error.message, 'error');
+    setNominals((data as NominalRow[]) ?? []);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function addNominal() {
+    const { code, name, cost_centre, department } = addForm;
+    if (!code.trim() || !name.trim()) {
+      flash('Account number and name are required.', 'error');
+      return;
+    }
+    setAddSaving(true);
+    const { error } = await supabase.from('nominal_codes').insert({
+      code:        code.trim(),
+      name:        name.trim(),
+      cost_centre: cost_centre.trim() || null,
+      department:  department.trim() || null,
+    });
+    if (error) flash('Error: ' + error.message, 'error');
+    else {
+      flash(`${name.trim()} added.`);
+      setAddForm(EMPTY_NOMINAL);
+      setShowAddForm(false);
+      await load();
+    }
+    setAddSaving(false);
+  }
+
+  async function toggleActive(n: NominalRow) {
+    setActing(n.id);
+    const { error } = await supabase
+      .from('nominal_codes')
+      .update({ is_active: !n.is_active })
+      .eq('id', n.id);
+    if (error) flash('Error: ' + error.message, 'error');
+    else { flash(`${n.name} ${n.is_active ? 'deactivated' : 'activated'}.`); await load(); }
+    setActing(null);
+  }
+
+  async function deleteNominal(n: NominalRow) {
+    if (!confirm(`Permanently delete "${n.name}" (${n.code})?\n\nThis won't affect existing invoices.`)) return;
+    setActing(n.id);
+    const { error } = await supabase.from('nominal_codes').delete().eq('id', n.id);
+    if (error) flash('Error: ' + error.message, 'error');
+    else { flash(`${n.name} deleted.`); await load(); }
+    setActing(null);
+  }
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return nominals;
+    return nominals.filter(n =>
+      n.code.toLowerCase().includes(q) ||
+      n.name.toLowerCase().includes(q) ||
+      (n.cost_centre?.toLowerCase().includes(q) ?? false) ||
+      (n.department?.toLowerCase().includes(q) ?? false),
+    );
+  }, [nominals, search]);
+
+  return (
+    <div>
+      <SectionHeader
+        title="Nominal codes"
+        subtitle={`${nominals.length} codes. These populate the cost centre and nominal account dropdowns on invoice review.`}
+        msg={msg}
+        msgType={msgType}
+        actions={
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input
+              style={{ ...s.input, width: 220 }}
+              placeholder="Search code, name or CC…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            <button className="btn" style={s.btnPrimary} onClick={() => setShowAddForm((v) => !v)}>
+              {showAddForm ? 'Cancel' : '+ Add nominal'}
+            </button>
+          </div>
+        }
+      />
+
+      {showAddForm && (
+        <div style={s.addForm} className="animate-rise">
+          <div style={s.addFormKicker}>§ New nominal code</div>
+          <div style={s.addFormTitle}>Add a nominal code</div>
+          <div style={s.addFormSub}>
+            Enter the Sage 200 nominal account number, description, and the default cost centre and department that will pre-fill on invoice review.
+          </div>
+          <div style={{ ...s.formGrid, gridTemplateColumns: 'repeat(4, 1fr)', marginTop: 14 }}>
+            <div style={s.formGroup}>
+              <label style={s.label}>Account number *</label>
+              <input
+                style={{ ...s.input, fontFamily: 'var(--font-mono)' }}
+                value={addForm.code}
+                placeholder="e.g. 5001"
+                onChange={(e) => setAddForm({ ...addForm, code: e.target.value })}
+              />
+            </div>
+            <div style={s.formGroup}>
+              <label style={s.label}>Description *</label>
+              <input
+                style={s.input}
+                value={addForm.name}
+                placeholder="e.g. Curriculum Resources"
+                onChange={(e) => setAddForm({ ...addForm, name: e.target.value })}
+              />
+            </div>
+            <div style={s.formGroup}>
+              <label style={s.label}>Cost centre</label>
+              <input
+                style={{ ...s.input, fontFamily: 'var(--font-mono)' }}
+                value={addForm.cost_centre}
+                placeholder="e.g. HB"
+                onChange={(e) => setAddForm({ ...addForm, cost_centre: e.target.value })}
+              />
+            </div>
+            <div style={s.formGroup}>
+              <label style={s.label}>Department</label>
+              <input
+                style={{ ...s.input, fontFamily: 'var(--font-mono)' }}
+                value={addForm.department}
+                placeholder="e.g. 01"
+                onChange={(e) => setAddForm({ ...addForm, department: e.target.value })}
+              />
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button className="btn" style={s.btnPrimary} disabled={addSaving} onClick={addNominal}>
+              {addSaving ? 'Saving…' : 'Add nominal →'}
+            </button>
+            <button className="btn" style={s.btnSecondary} onClick={() => { setShowAddForm(false); setAddForm(EMPTY_NOMINAL); }}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div style={s.card}>
+        {loading ? (
+          <div style={s.loading}>Loading nominal codes…</div>
+        ) : (
+          <table style={s.table}>
+            <thead>
+              <tr>
+                <th style={s.th}>Account number</th>
+                <th style={s.th}>Description</th>
+                <th style={s.th}>Cost centre</th>
+                <th style={s.th}>Department</th>
+                <th style={s.th}>Status</th>
+                <th style={{ ...s.th, textAlign: 'right' }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((n, idx) => (
+                <tr key={n.id} style={{ ...s.row, ...(idx % 2 === 1 ? s.rowAlt : {}), opacity: n.is_active ? 1 : 0.5 }}>
+                  <td style={{ ...s.td, ...s.mono, fontSize: 12, fontWeight: 600 }}>{n.code}</td>
+                  <td style={s.td}><div style={s.name}>{n.name}</div></td>
+                  <td style={s.td}>
+                    {n.cost_centre ? (
+                      <span style={nm.ccBadge}>{n.cost_centre}</span>
+                    ) : (
+                      <span style={s.faint}>—</span>
+                    )}
+                  </td>
+                  <td style={{ ...s.td, ...s.mono, fontSize: 12 }}>
+                    {n.department ?? <span style={s.faint}>—</span>}
+                  </td>
+                  <td style={s.td}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ ...s.statusDot, background: n.is_active ? 'var(--success)' : 'var(--ink-faint)' }} />
+                      <span style={{ fontSize: 12, color: n.is_active ? 'var(--ink)' : 'var(--ink-faint)' }}>
+                        {n.is_active ? 'Active' : 'Inactive'}
+                      </span>
+                    </span>
+                  </td>
+                  <td style={{ ...s.td, textAlign: 'right' }}>
+                    <div style={{ display: 'inline-flex', gap: 6 }}>
+                      <button
+                        className="btn"
+                        style={s.btnSecondary}
+                        disabled={acting === n.id}
+                        onClick={() => toggleActive(n)}
+                      >
+                        {acting === n.id ? '…' : n.is_active ? 'Deactivate' : 'Activate'}
+                      </button>
+                      <button
+                        className="btn"
+                        style={s.btnDanger}
+                        disabled={acting === n.id}
+                        onClick={() => deleteNominal(n)}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {!loading && filtered.length === 0 && (
+          <div style={s.empty}>
+            {search ? `No nominal codes match "${search}".` : 'No nominal codes yet. Add one above to get started.'}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Nominals-tab-specific styles
+const nm: Record<string, React.CSSProperties> = {
+  ccBadge: {
+    display: 'inline-block',
+    padding: '2px 8px',
+    borderRadius: 6,
+    background: 'rgba(0,180,216,0.08)',
+    color: 'var(--accent)',
+    border: '1px solid rgba(0,180,216,0.20)',
+    fontSize: 11,
+    fontWeight: 700,
+    fontFamily: 'var(--font-mono)',
+    letterSpacing: '0.06em',
+  },
+};
 
 // ─── Companies Tab ────────────────────────────────────────────────────────────
 
