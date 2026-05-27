@@ -148,6 +148,8 @@ interface MailboxRow {
   id: string;
   email: string;
   label: string;
+  folder_id: string | null;
+  folder_name: string | null;
   company: { slug: string; name: string };
 }
 
@@ -161,11 +163,16 @@ async function processMailbox(
   mailboxEmail: string,
   companySlug: string,
   results: ProcessResult,
+  folderId?: string | null,
 ): Promise<void> {
+  // Use the configured folder if set, otherwise fall back to the default Inbox.
+  // Graph path: /mailFolders/{id}/messages  OR  /mailFolders/inbox/messages
+  const folderSegment = folderId ? `mailFolders/${encodeURIComponent(folderId)}` : 'mailFolders/inbox';
+
   let messages: GraphMessage[];
   try {
     const { value } = await graphGet<{ value: GraphMessage[] }>(
-      `/users/${encodeURIComponent(mailboxEmail)}/mailFolders/inbox/messages?$filter=isRead eq false&$top=50&$select=id,subject,from,receivedDateTime,hasAttachments,body`,
+      `/users/${encodeURIComponent(mailboxEmail)}/${folderSegment}/messages?$filter=isRead eq false&$top=50&$select=id,subject,from,receivedDateTime,hasAttachments,body`,
     );
     messages = value;
   } catch (err) {
@@ -300,6 +307,9 @@ async function processMailbox(
             status: 'pending_finance_review',
             company: companySlug,
             supplier_name: classification.supplier_name ?? null,
+            email_subject: message.subject ?? null,
+            email_from: message.from.emailAddress.address ?? null,
+            email_date: message.receivedDateTime ?? null,
           }).select().single();
 
         if (poError || !poRecord) {
@@ -337,7 +347,7 @@ Deno.serve(async (req) => {
   // Load active mailboxes dynamically from the database
   const { data: mailboxRows, error: mailboxErr } = await supabaseAdmin
     .from('mailboxes')
-    .select('id, email, label, company:companies(slug, name)')
+    .select('id, email, label, folder_id, folder_name, company:companies(slug, name)')
     .eq('is_active', true);
 
   if (mailboxErr || !mailboxRows || mailboxRows.length === 0) {
@@ -348,7 +358,7 @@ Deno.serve(async (req) => {
   }
 
   for (const row of mailboxRows as unknown as MailboxRow[]) {
-    await processMailbox(row.email, row.company.slug, results);
+    await processMailbox(row.email, row.company.slug, results, row.folder_id);
   }
 
   return new Response(JSON.stringify({ ...results, mailboxes_polled: mailboxRows.length }), {
