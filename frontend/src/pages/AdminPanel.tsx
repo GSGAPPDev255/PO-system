@@ -952,23 +952,18 @@ interface Approver {
   synced_at: string;
 }
 
-interface CompanyOption { value: string; label: string }
+const EMPTY_APPROVER = { display_name: '', email: '', department: '' };
 
 function ApproversTab() {
-  const [approvers, setApprovers]         = useState<Approver[]>([]);
-  const [companyOptions, setCompanyOptions] = useState<CompanyOption[]>([{ value: '', label: 'Group-wide (all companies)' }]);
-  const [loading, setLoading]             = useState(true);
-  const [showForm, setShowForm]           = useState(false);
-  const [form, setForm]                   = useState({ display_name: '', email: '', department: '', company: '' });
-  const [saving, setSaving]               = useState(false);
-  const [toggling, setToggling]           = useState<string | null>(null);
-  const [msg, setMsg]                     = useState('');
-  const [msgType, setMsgType]             = useState<'success' | 'error'>('success');
-  // GAL search
-  const [galQuery, setGalQuery]           = useState('');
-  const [galResults, setGalResults]       = useState<GalUser[]>([]);
-  const [galSearching, setGalSearching]   = useState(false);
-  const [galError, setGalError]           = useState<string | null>(null);
+  const [approvers, setApprovers] = useState<Approver[]>([]);
+  const [search, setSearch]       = useState('');
+  const [loading, setLoading]     = useState(true);
+  const [showForm, setShowForm]   = useState(false);
+  const [form, setForm]           = useState(EMPTY_APPROVER);
+  const [saving, setSaving]       = useState(false);
+  const [acting, setActing]       = useState<string | null>(null);
+  const [msg, setMsg]             = useState('');
+  const [msgType, setMsgType]     = useState<'success' | 'error'>('success');
 
   function flash(m: string, type: 'success' | 'error' = 'success') {
     setMsg(m); setMsgType(type);
@@ -977,68 +972,29 @@ function ApproversTab() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [approversRes, companiesRes] = await Promise.all([
-      supabase.from('approvers').select('*').order('display_name'),
-      supabase.from('companies').select('slug, name').eq('is_active', true).order('name'),
-    ]);
-    if (approversRes.error) flash('Could not load approvers: ' + approversRes.error.message, 'error');
-    setApprovers((approversRes.data as Approver[]) ?? []);
-    const opts: CompanyOption[] = [{ value: '', label: 'Group-wide (all companies)' }];
-    for (const c of (companiesRes.data ?? []) as { slug: string; name: string }[]) {
-      opts.push({ value: c.slug, label: c.name });
-    }
-    setCompanyOptions(opts);
+    const { data, error } = await supabase
+      .from('approvers')
+      .select('*')
+      .order('display_name');
+    if (error) flash('Could not load approvers: ' + error.message, 'error');
+    setApprovers((data as Approver[]) ?? []);
     setLoading(false);
   }, []);
 
   useEffect(() => { load(); }, [load]);
 
-  // Debounced GAL search
-  useEffect(() => {
-    if (galQuery.trim().length < 2) { setGalResults([]); setGalError(null); return; }
-    const timer = setTimeout(async () => {
-      setGalSearching(true);
-      setGalError(null);
-      try {
-        const { data, error } = await supabase.functions.invoke('gal-search', {
-          body: { query: galQuery.trim() },
-        });
-        if (!error && data?.users) {
-          setGalResults(data.users as GalUser[]);
-        } else {
-          setGalResults([]);
-          const detail = data?.detail ?? data?.fallback_error ?? error?.message ?? 'Unknown error';
-          const hint = data?.hint ?? '';
-          setGalError(`Directory search failed: ${detail}${hint ? ` — ${hint}` : ''}`);
-        }
-      } catch (e) {
-        setGalResults([]);
-        setGalError(`Directory search exception: ${(e as Error).message}`);
-      }
-      setGalSearching(false);
-    }, 350);
-    return () => clearTimeout(timer);
-  }, [galQuery]);
-
-  function selectGalUser(u: GalUser) {
-    setForm({
-      ...form,
-      email: (u.mail ?? u.userPrincipalName).toLowerCase(),
-      display_name: u.displayName,
-      department: u.department ?? form.department,
-    });
-    setGalQuery('');
-    setGalResults([]);
-  }
-
-  function resetForm() {
-    setForm({ display_name: '', email: '', department: '', company: '' });
-    setGalQuery('');
-    setGalResults([]);
-  }
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
+    if (!q) return approvers;
+    return approvers.filter((a) =>
+      a.display_name.toLowerCase().includes(q) ||
+      a.email.toLowerCase().includes(q) ||
+      (a.department ?? '').toLowerCase().includes(q),
+    );
+  }, [approvers, search]);
 
   async function addApprover() {
-    const { display_name, email, department, company } = form;
+    const { display_name, email, department } = form;
     if (!display_name.trim() || !email.trim()) {
       flash('Name and email are required.', 'error'); return;
     }
@@ -1047,42 +1003,55 @@ function ApproversTab() {
       display_name: display_name.trim(),
       email:        email.trim().toLowerCase(),
       department:   department.trim() || null,
-      company:      company || null,
       is_active:    true,
       synced_at:    new Date().toISOString(),
     });
     if (error) flash('Error: ' + error.message, 'error');
     else {
       flash(`${display_name.trim()} added as approver.`);
-      resetForm();
+      setForm(EMPTY_APPROVER);
       setShowForm(false);
       await load();
     }
     setSaving(false);
   }
 
-  async function toggleActive(approver: Approver) {
-    setToggling(approver.id);
-    const { error } = await supabase
-      .from('approvers')
-      .update({ is_active: !approver.is_active })
-      .eq('id', approver.id);
+  async function toggleActive(a: Approver) {
+    setActing(a.id);
+    const { error } = await supabase.from('approvers').update({ is_active: !a.is_active }).eq('id', a.id);
     if (error) flash('Error: ' + error.message, 'error');
-    else { flash(`${approver.display_name} ${approver.is_active ? 'deactivated' : 'activated'}.`); await load(); }
-    setToggling(null);
+    else { flash(`${a.display_name} ${a.is_active ? 'deactivated' : 'activated'}.`); await load(); }
+    setActing(null);
+  }
+
+  async function deleteApprover(a: Approver) {
+    if (!window.confirm(`Permanently delete ${a.display_name}? This cannot be undone.`)) return;
+    setActing(a.id);
+    const { error } = await supabase.from('approvers').delete().eq('id', a.id);
+    if (error) flash('Error: ' + error.message, 'error');
+    else { flash(`${a.display_name} removed.`); await load(); }
+    setActing(null);
   }
 
   return (
     <div>
       <SectionHeader
         title="Approvers"
-        subtitle="Manage who can approve invoices. Add or deactivate approvers at any time."
+        subtitle="People who can approve invoices. Add or remove them manually — no directory sync."
         msg={msg}
         msgType={msgType}
         actions={
-          <button className="btn" style={s.btnPrimary} onClick={() => setShowForm((v) => !v)}>
-            {showForm ? 'Cancel' : '+ Add approver'}
-          </button>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <input
+              style={{ ...s.input, width: 220, margin: 0 }}
+              placeholder="Search approvers…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            <button className="btn" style={s.btnPrimary} onClick={() => setShowForm((v) => !v)}>
+              {showForm ? 'Cancel' : '+ Add approver'}
+            </button>
+          </div>
         }
       />
 
@@ -1092,56 +1061,9 @@ function ApproversTab() {
           <div style={s.addFormKicker}>§ New approver</div>
           <div style={s.addFormTitle}>Add an approver</div>
           <div style={s.addFormSub}>
-            Search the directory to find someone, or fill in their details manually.
+            Enter the person's details. Their email must match their Microsoft 365 sign-in address.
           </div>
-
-          {/* GAL search */}
-          <div style={{ marginTop: 16, marginBottom: 4 }}>
-            <label style={s.label}>Search directory (Azure AD)</label>
-            <div style={{ position: 'relative', marginTop: 6 }}>
-              <input
-                style={{ ...s.input, width: '100%', boxSizing: 'border-box', paddingLeft: 36 }}
-                value={galQuery}
-                placeholder="Type a name or email to search…"
-                onChange={(e) => setGalQuery(e.target.value)}
-              />
-              <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', fontSize: 13, color: 'var(--ink-faint)', pointerEvents: 'none' }}>
-                {galSearching ? '⏳' : '⌕'}
-              </span>
-            </div>
-            {galResults.length > 0 && (
-              <div style={gi.dropdown}>
-                {galResults.map((u) => (
-                  <button key={u.id} style={gi.dropdownItem} onClick={() => selectGalUser(u)}>
-                    <div style={gi.dropdownName}>{u.displayName}</div>
-                    <div style={gi.dropdownMeta}>
-                      {(u.mail ?? u.userPrincipalName).toLowerCase()}
-                      {u.department && <> · {u.department}</>}
-                      {u.jobTitle && <> · {u.jobTitle}</>}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-            {galQuery.trim().length >= 2 && !galSearching && galResults.length === 0 && !galError && (
-              <div style={{ fontSize: 11.5, color: 'var(--ink-faint)', marginTop: 6, fontStyle: 'italic' }}>
-                No results — fill in manually below.
-              </div>
-            )}
-            {galError && (
-              <div style={{ marginTop: 8, padding: '8px 12px', background: 'rgba(160,49,53,0.07)', border: '1px solid rgba(160,49,53,0.22)', borderRadius: 6, fontSize: 11.5, color: 'var(--danger)', lineHeight: 1.5 }}>
-                <strong>⚠ Azure AD directory search unavailable.</strong><br />
-                {galError.includes('AADSTS7000215') || galError.includes('invalid_client') || galError.includes('client secret')
-                  ? 'The Azure AD client secret has expired. Ask your IT admin to generate a new secret in the Azure portal (App registrations → Certificates & secrets) and update the AZURE_CLIENT_SECRET in Supabase Edge Function secrets.'
-                  : galError.includes('Authorization_RequestDenied') || galError.includes('insufficient_scope')
-                    ? 'The Azure AD app is missing the required Graph API permission (User.ReadBasic.All). Ask IT to grant admin consent in the Azure portal.'
-                    : galError
-                }
-              </div>
-            )}
-          </div>
-
-          <div style={{ ...s.formGrid, marginTop: 14 }}>
+          <div style={{ ...s.formGrid, marginTop: 16 }}>
             <div style={s.formGroup}>
               <label style={s.label}>Full name *</label>
               <input style={s.input} value={form.display_name} placeholder="e.g. Jane Smith"
@@ -1157,21 +1079,12 @@ function ApproversTab() {
               <input style={s.input} value={form.department} placeholder="e.g. Finance"
                 onChange={(e) => setForm({ ...form, department: e.target.value })} />
             </div>
-            <div style={s.formGroup}>
-              <label style={s.label}>Company</label>
-              <select style={s.input} value={form.company}
-                onChange={(e) => setForm({ ...form, company: e.target.value })}>
-                {companyOptions.map((o) => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
-                ))}
-              </select>
-            </div>
           </div>
           <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
             <button className="btn" style={s.btnPrimary} disabled={saving} onClick={addApprover}>
               {saving ? 'Saving…' : 'Add approver →'}
             </button>
-            <button className="btn" style={s.btnSecondary} onClick={() => { setShowForm(false); resetForm(); }}>
+            <button className="btn" style={s.btnSecondary} onClick={() => { setShowForm(false); setForm(EMPTY_APPROVER); }}>
               Cancel
             </button>
           </div>
@@ -1182,20 +1095,23 @@ function ApproversTab() {
       <div style={s.card}>
         {loading ? (
           <div style={s.loading}>Loading approvers…</div>
+        ) : filtered.length === 0 ? (
+          <div style={s.empty}>
+            {search ? `No approvers matching "${search}".` : 'No approvers yet. Add one above to get started.'}
+          </div>
         ) : (
           <table style={s.table}>
             <thead>
               <tr>
                 <th style={s.th}>Name</th>
                 <th style={s.th}>Email</th>
-                <th style={s.th}>School</th>
                 <th style={s.th}>Department</th>
                 <th style={s.th}>Status</th>
                 <th style={{ ...s.th, textAlign: 'right' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {approvers.map((a, idx) => (
+              {filtered.map((a, idx) => (
                 <tr key={a.id} style={{ ...s.row, ...(idx % 2 === 1 ? s.rowAlt : {}) }}>
                   <td style={s.td}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -1204,16 +1120,6 @@ function ApproversTab() {
                     </div>
                   </td>
                   <td style={{ ...s.td, ...s.mono }}>{a.email}</td>
-                  <td style={s.td}>
-                    {a.company
-                      ? <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 20, background: 'var(--accent-soft)', color: 'var(--accent-text)', border: '1px solid var(--border)' }}>
-                          {companyOptions.find((o) => o.value === a.company)?.label ?? a.company}
-                        </span>
-                      : <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 20, background: 'rgba(139,92,246,0.1)', color: '#A78BFA', border: '1px solid rgba(139,92,246,0.25)' }}>
-                          Group-wide
-                        </span>
-                    }
-                  </td>
                   <td style={{ ...s.td, color: 'var(--ink-muted)', fontSize: 12.5 }}>
                     {a.department ?? <span style={s.faint}>—</span>}
                   </td>
@@ -1226,22 +1132,29 @@ function ApproversTab() {
                     </span>
                   </td>
                   <td style={{ ...s.td, textAlign: 'right' }}>
-                    <button
-                      className="btn"
-                      style={a.is_active ? s.btnDanger : s.btnSecondary}
-                      disabled={toggling === a.id}
-                      onClick={() => toggleActive(a)}
-                    >
-                      {toggling === a.id ? '…' : a.is_active ? 'Deactivate' : 'Activate'}
-                    </button>
+                    <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                      <button
+                        className="btn"
+                        style={a.is_active ? s.btnSecondary : s.btnPrimary}
+                        disabled={acting === a.id}
+                        onClick={() => toggleActive(a)}
+                      >
+                        {acting === a.id ? '…' : a.is_active ? 'Deactivate' : 'Activate'}
+                      </button>
+                      <button
+                        className="btn"
+                        style={s.btnDanger}
+                        disabled={acting === a.id}
+                        onClick={() => deleteApprover(a)}
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-        )}
-        {!loading && approvers.length === 0 && (
-          <div style={s.empty}>No approvers yet. Add one above to get started.</div>
         )}
       </div>
     </div>
