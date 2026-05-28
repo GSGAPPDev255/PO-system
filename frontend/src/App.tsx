@@ -153,8 +153,19 @@ export default function App() {
     // from localStorage synchronously during Supabase client construction).
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (cancelled) return;
-      if (session?.user) fetchProfile(session.user.id);
-      else applyProfile(null);
+      if (session?.user) {
+        fetchProfile(session.user.id);
+      } else {
+        // If there is a PKCE code in the URL we are mid-callback — the Supabase
+        // client is still exchanging the code asynchronously.  Do NOT set profile
+        // to null here; wait for the SIGNED_IN event from onAuthStateChange instead.
+        const hasCallbackCode =
+          new URLSearchParams(window.location.search).has('code') ||
+          new URLSearchParams(window.location.hash.replace(/^#/, '')).has('access_token');
+        if (!hasCallbackCode) {
+          applyProfile(null);
+        }
+      }
     });
 
     // Only listen for subsequent auth transitions — skip INITIAL_SESSION entirely.
