@@ -2465,6 +2465,9 @@ const FUNCTIONS: FnStatus[] = [
   { name: 'admin-actions',                label: 'Admin actions',          schedule: 'On-demand' },
 ];
 
+interface MailboxRow { id: string; email: string; label: string; folder_id: string | null; folder_name: string | null; is_active: boolean }
+interface FolderOption { id: string | null; displayName: string; unreadItemCount: number; totalItemCount: number }
+
 function SystemTab() {
   const [triggering, setTriggering]   = useState<string | null>(null);
   const [results, setResults]         = useState<Record<string, string>>({});
@@ -2475,14 +2478,23 @@ function SystemTab() {
   const [intakeDetail, setIntakeDetail] = useState('');
   const [diagRunning, setDiagRunning]   = useState(false);
   const [diagResult, setDiagResult]     = useState<string | null>(null);
+  // Mailbox folder picker
+  const [mailboxes, setMailboxes]         = useState<MailboxRow[]>([]);
+  const [folderPickerId, setFolderPickerId] = useState<string | null>(null); // which mailbox is open
+  const [folderOptions, setFolderOptions]  = useState<FolderOption[]>([]);
+  const [folderLoading, setFolderLoading]  = useState(false);
+  const [folderSaving, setFolderSaving]    = useState(false);
+  const [folderMsg, setFolderMsg]          = useState('');
+  const [folderSelected, setFolderSelected] = useState<string | null | undefined>(undefined); // undefined = not yet chosen
 
   useEffect(() => {
     (async () => {
-      const [posRes, filesRes, exportsRes, pendingRes] = await Promise.all([
+      const [posRes, filesRes, exportsRes, pendingRes, mbRes] = await Promise.all([
         supabase.from('purchase_orders').select('id', { count: 'exact', head: true }),
         supabase.from('invoice_files').select('id', { count: 'exact', head: true }),
         supabase.from('csv_exports').select('id', { count: 'exact', head: true }),
         supabase.from('purchase_orders').select('id', { count: 'exact', head: true }).eq('status', 'pending_finance_review'),
+        supabase.from('mailboxes').select('id,email,label,folder_id,folder_name,is_active').order('label'),
       ]);
       setStats({
         pos:     posRes.count ?? 0,
@@ -2490,8 +2502,54 @@ function SystemTab() {
         exports: exportsRes.count ?? 0,
         pending: pendingRes.count ?? 0,
       });
+      setMailboxes((mbRes.data as MailboxRow[]) ?? []);
     })();
   }, []);
+
+  async function openFolderPicker(mb: MailboxRow) {
+    setFolderPickerId(mb.id);
+    setFolderOptions([]);
+    setFolderSelected(undefined);
+    setFolderMsg('');
+    setFolderLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('list-mail-folders', {
+        body: { mailbox: mb.email },
+      });
+      if (error || data?.error) {
+        setFolderMsg('Could not load folders: ' + (data?.error ?? error?.message));
+        setFolderOptions([]);
+      } else {
+        setFolderOptions(data.folders as FolderOption[]);
+        setFolderSelected(mb.folder_id ?? null); // pre-select current
+      }
+    } catch (e) {
+      setFolderMsg('Error: ' + (e as Error).message);
+    }
+    setFolderLoading(false);
+  }
+
+  async function saveFolder(mb: MailboxRow) {
+    if (folderSelected === undefined) return;
+    setFolderSaving(true);
+    const chosen = folderOptions.find((f) => f.id === folderSelected);
+    const { error } = await supabase.from('mailboxes').update({
+      folder_id:   folderSelected,
+      folder_name: chosen?.displayName ?? null,
+    }).eq('id', mb.id);
+    if (error) {
+      setFolderMsg('Save failed: ' + error.message);
+    } else {
+      setFolderMsg('✓ Saved — email intake will now poll "' + (chosen?.displayName ?? 'Inbox') + '"');
+      setMailboxes((prev) => prev.map((m) =>
+        m.id === mb.id
+          ? { ...m, folder_id: folderSelected, folder_name: chosen?.displayName ?? null }
+          : m
+      ));
+      setTimeout(() => { setFolderPickerId(null); setFolderMsg(''); }, 2500);
+    }
+    setFolderSaving(false);
+  }
 
   async function runDiagnostics() {
     setDiagRunning(true);
@@ -2657,6 +2715,78 @@ function SystemTab() {
             <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{intakeDetail}</pre>
           </div>
         )}
+      </div>
+
+      {/* Mailbox folder configuration */}
+      <div style={{ ...s.card, marginBottom: 12 }}>
+        <div style={sy.healthKicker}>§ Mailbox folder</div>
+        <div style={sy.healthTitle}>Which folder to poll for new emails</div>
+        <div style={{ ...sy.healthSub, marginBottom: 16 }}>
+          By default email-intake reads the main Inbox. Select a subfolder below to restrict it to only that folder.
+        </div>
+        {mailboxes.filter((m) => m.is_active).map((mb) => (
+          <div key={mb.id} style={{ marginBottom: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' as const }}>
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{mb.email}</div>
+                <div style={{ fontSize: 12, color: 'var(--ink-muted)', marginTop: 2 }}>
+                  Currently polling:{' '}
+                  <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--accent)', fontSize: 11.5 }}>
+                    {mb.folder_name ?? 'Inbox (default)'}
+                  </span>
+                </div>
+              </div>
+              <button
+                className="btn"
+                style={s.btnSecondary}
+                disabled={folderLoading && folderPickerId === mb.id}
+                onClick={() => folderPickerId === mb.id ? setFolderPickerId(null) : openFolderPicker(mb)}
+              >
+                {folderLoading && folderPickerId === mb.id ? '⏳ Loading…'
+                  : folderPickerId === mb.id ? 'Cancel'
+                  : '📂 Change folder'}
+              </button>
+            </div>
+
+            {/* Folder picker dropdown */}
+            {folderPickerId === mb.id && !folderLoading && (
+              <div style={{ marginTop: 12, padding: '14px 16px', background: 'rgba(0,180,216,0.04)', border: '1px solid rgba(0,180,216,0.15)', borderRadius: 8 }}>
+                {folderOptions.length > 0 ? (
+                  <>
+                    <label style={{ ...s.label, display: 'block', marginBottom: 6 }}>Select folder</label>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' as const }}>
+                      <select
+                        style={{ ...s.input, flex: 1, minWidth: 240 }}
+                        value={folderSelected === null ? '' : (folderSelected ?? '')}
+                        onChange={(e) => setFolderSelected(e.target.value === '' ? null : e.target.value)}
+                      >
+                        {folderOptions.map((f) => (
+                          <option key={f.id ?? '__inbox__'} value={f.id ?? ''}>
+                            {f.displayName}
+                            {f.totalItemCount > 0 ? ` (${f.unreadItemCount} unread / ${f.totalItemCount} total)` : ''}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        className="btn"
+                        style={s.btnPrimary}
+                        disabled={folderSaving || folderSelected === undefined}
+                        onClick={() => saveFolder(mb)}
+                      >
+                        {folderSaving ? 'Saving…' : 'Save →'}
+                      </button>
+                    </div>
+                  </>
+                ) : null}
+                {folderMsg && (
+                  <div style={{ marginTop: 10, fontSize: 12.5, color: folderMsg.startsWith('✓') ? 'var(--success)' : 'var(--danger)' }}>
+                    {folderMsg}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
       </div>
 
       {/* Azure AD / Graph diagnostics */}
