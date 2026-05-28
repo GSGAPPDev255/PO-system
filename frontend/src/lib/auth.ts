@@ -99,6 +99,13 @@ export async function getInvoiceSignedUrl(storagePath: string): Promise<string |
     .from('invoices')
     .createSignedUrl(storagePath, 3600);
 
-  if (error || !data?.signedUrl) return null;
+  if (error) {
+    console.error('[getInvoiceSignedUrl] storage error:', error.message, error);
+    return null;
+  }
+  if (!data?.signedUrl) {
+    console.warn('[getInvoiceSignedUrl] no signedUrl in response:', data);
+    return null;
+  }
   return data.signedUrl;
 }

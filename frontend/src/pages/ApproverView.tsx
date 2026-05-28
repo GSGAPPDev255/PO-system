@@ -30,8 +30,15 @@ export default function ApproverView() {
   useEffect(() => {
     if (po) {
       const fileData = (po as Record<string, unknown>).invoice_file as { storage_path?: string } | null;
+      console.debug('[ApproverView] invoice_file join:', fileData);
       if (fileData?.storage_path) {
-        getInvoiceSignedUrl(fileData.storage_path).then(setPdfUrl);
+        console.debug('[ApproverView] fetching signed URL for:', fileData.storage_path);
+        getInvoiceSignedUrl(fileData.storage_path).then((url) => {
+          console.debug('[ApproverView] signed URL result:', url ? 'OK' : 'null');
+          setPdfUrl(url);
+        });
+      } else {
+        console.warn('[ApproverView] no storage_path on invoice_file — fileData:', fileData);
       }
     }
   }, [po]);
