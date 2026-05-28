@@ -195,6 +195,22 @@ export default function Login() {
           Trouble signing in?{' '}
           <span style={styles.helpLink}>Contact the finance team.</span>
         </div>
+
+        {/* Emergency escape hatch — clears ALL Supabase + app session data and
+            does a hard reload. Useful when a stale or corrupted session prevents
+            login from completing. */}
+        <button
+          style={styles.clearBtn}
+          onClick={() => {
+            try { localStorage.clear(); } catch { /* ignore */ }
+            try { sessionStorage.clear(); } catch { /* ignore */ }
+            // Use assign (not reload) so any error params in the URL are dropped too.
+            window.location.assign('/login');
+          }}
+          title="Clears all cached session data and reloads the page"
+        >
+          Clear session &amp; reload
+        </button>
       </div>
     </div>
   );
@@ -730,6 +746,20 @@ const styles: Record<string, React.CSSProperties> = {
     color: 'rgba(0,198,224,0.6)',
     fontStyle: 'italic',
     fontFamily: 'var(--font-display)',
+  },
+  clearBtn: {
+    marginTop: 2,
+    background: 'none',
+    border: 'none',
+    padding: 0,
+    fontSize: 11,
+    color: 'rgba(240,244,255,0.18)',
+    cursor: 'pointer',
+    fontFamily: 'var(--font-ui)',
+    letterSpacing: '0.03em',
+    textDecoration: 'underline',
+    textDecorationStyle: 'dotted' as const,
+    textUnderlineOffset: 3,
   },
 
   /* ── Redirect overlay ────────────────────────────────────────────────────── */

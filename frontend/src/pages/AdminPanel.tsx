@@ -1820,12 +1820,33 @@ function CompaniesTab() {
     setFoldersList([]);
     setFoldersLoading(true);
     try {
-      const { data, error } = await supabase.functions.invoke('list-mail-folders', {
-        body: { mailbox: m.email },
-      });
-      if (error) throw new Error(error.message);
-      if (data?.error) throw new Error(data.error + (data.hint ? ` — ${data.hint}` : ''));
-      setFoldersList((data.folders ?? []) as MailFolder[]);
+      // Get session token for auth header
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Not signed in — session expired');
+
+      // Use fetch directly to capture error response body
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/list-mail-folders`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ mailbox: m.email }),
+        },
+      );
+
+      const responseData = await response.json();
+
+      if (!response.ok) {
+        // Function returned an error (with details in the JSON body)
+        const err = responseData.error || `HTTP ${response.status}`;
+        const hint = responseData.hint ? ` — ${responseData.hint}` : '';
+        throw new Error(err + hint);
+      }
+
+      setFoldersList((responseData.folders ?? []) as MailFolder[]);
     } catch (err) {
       setFoldersError((err as Error).message);
     } finally {
