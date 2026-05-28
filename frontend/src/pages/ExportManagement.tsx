@@ -72,7 +72,7 @@ export default function ExportManagement() {
   const clearAll    = () => setSelected(new Set());
   const selectReady = () => {
     const readyIds = approvedPos
-      .filter((p) => checkReadiness(p as PoRecord, nominalByPo[p.id] ?? []).ready)
+      .filter((p) => checkReadiness(p as unknown as PoRecord, nominalByPo[p.id] ?? []).ready)
       .map((p) => p.id);
     setSelected(new Set(readyIds));
   };
@@ -114,9 +114,9 @@ export default function ExportManagement() {
   const selectedPos = approvedPos.filter((p) => selected.has(p.id));
   const totalGross  = selectedPos.reduce((sum, p) => sum + Number(p.gross_amount || 0), 0);
   const incompleteSelected = selectedPos.filter(
-    (p) => !checkReadiness(p as PoRecord, nominalByPo[p.id] ?? []).ready
+    (p) => !checkReadiness(p as unknown as PoRecord, nominalByPo[p.id] ?? []).ready
   );
-  const readyCount   = approvedPos.filter((p) => checkReadiness(p as PoRecord, nominalByPo[p.id] ?? []).ready).length;
+  const readyCount   = approvedPos.filter((p) => checkReadiness(p as unknown as PoRecord, nominalByPo[p.id] ?? []).ready).length;
   const missingCount = approvedPos.length - readyCount;
 
   return (
@@ -214,7 +214,7 @@ export default function ExportManagement() {
                   const poLines    = nominalByPo[po.id] ?? [];
                   const n1         = poLines.find((l) => l.line_number === 1);
                   const n2         = poLines.find((l) => l.line_number === 2);
-                  const { ready, missing } = checkReadiness(po as PoRecord, poLines);
+                  const { ready, missing } = checkReadiness(po as unknown as PoRecord, poLines);
                   return (
                     <tr
                       key={po.id}
