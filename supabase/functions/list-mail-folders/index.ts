@@ -1,12 +1,17 @@
 /**
- * list-mail-folders: Returns ALL root-level mail folders for a given mailbox.
+ * list-mail-folders: Returns mail folders for a given mailbox.
  *
- * Queries /mailFolders (not /mailFolders/inbox/childFolders) so it picks up
- * top-level folders such as custom folders created by SharePoint, Teams, etc.
+ * Queries BOTH /mailFolders (root-level) AND /mailFolders/inbox/childFolders
+ * and merges the results. This handles folders created by SharePoint at the
+ * root level as well as custom subfolders under Inbox.
  *
  * Body:  { mailbox: string }
  * Auth:  admin role required
  * Returns: { folders: Array<{ id, displayName, unreadItemCount, totalItemCount }> }
+ *
+ * NOTE: Always returns HTTP 200. Graph API errors are surfaced as
+ * { error, detail, hint } in the response body so the UI can show
+ * the actual message rather than a generic non-2xx error.
  */
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -92,35 +97,70 @@ Deno.serve(async (req) => {
     }, 500);
   }
 
-  // Fetch ALL root-level mail folders (not just Inbox children)
-  const url =
-    `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}` +
-    `/mailFolders?$select=id,displayName,unreadItemCount,totalItemCount&$top=100`;
-
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${graphToken}`, 'Content-Type': 'application/json' },
-  });
-
-  if (!res.ok) {
-    const errBody = await res.text();
-    return json({
-      error: `Graph API error (${res.status})`,
-      detail: errBody,
-      hint: res.status === 403
-        ? 'The Azure AD app needs Mail.Read Application permission with admin consent.'
-        : res.status === 404
-        ? `Mailbox not found: ${mailbox}.`
-        : undefined,
-    }, 500);
-  }
-
   type GraphFolder = { id: string; displayName: string; unreadItemCount: number; totalItemCount: number };
 
-  const data = await res.json() as { value: GraphFolder[] };
+  const headers = { Authorization: `Bearer ${graphToken}`, 'Content-Type': 'application/json' };
+  const base = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}`;
+  const select = '$select=id,displayName,unreadItemCount,totalItemCount&$top=100';
 
-  // Sort: put well-known folders first, then alphabetical
+  // Fetch root-level folders AND inbox child-folders in parallel.
+  // We capture both so we handle folders at either level.
+  const [rootRes, inboxRes] = await Promise.all([
+    fetch(`${base}/mailFolders?${select}`, { headers }),
+    fetch(`${base}/mailFolders/inbox/childFolders?${select}`, { headers }),
+  ]);
+
+  // Helper to parse a Graph response, returning [] on error with an error note.
+  async function parseGraphResponse(
+    res: Response,
+    label: string,
+  ): Promise<{ folders: GraphFolder[]; error?: string }> {
+    if (!res.ok) {
+      const errBody = await res.text();
+      let hint: string | undefined;
+      if (res.status === 403) hint = 'The Azure AD app needs Mail.Read Application permission with admin consent.';
+      else if (res.status === 404) hint = `Mailbox not found: ${mailbox}.`;
+      return {
+        folders: [],
+        error: `Graph API error on ${label} (${res.status}): ${errBody}${hint ? ' — ' + hint : ''}`,
+      };
+    }
+    const data = await res.json() as { value: GraphFolder[] };
+    return { folders: data.value ?? [] };
+  }
+
+  const [rootData, inboxData] = await Promise.all([
+    parseGraphResponse(rootRes, 'mailFolders'),
+    parseGraphResponse(inboxRes, 'mailFolders/inbox/childFolders'),
+  ]);
+
+  // If BOTH calls failed, return an error (still as 200 so the UI can read it)
+  if (rootData.error && inboxData.error) {
+    return json({
+      error: 'Could not load folders from Microsoft 365',
+      detail: rootData.error,
+      detail2: inboxData.error,
+      hint: rootData.error.includes('403') || inboxData.error.includes('403')
+        ? 'The Azure AD app needs Mail.Read Application permission with admin consent.'
+        : rootData.error.includes('404') || inboxData.error.includes('404')
+        ? `Mailbox not found: ${mailbox}. Check the email address is correct.`
+        : 'Check the Azure AD app credentials and permissions in the Supabase Edge Function secrets.',
+    });
+  }
+
+  // Merge root folders + inbox children, deduplicating by id.
+  const seen = new Set<string>();
+  const allFolders: GraphFolder[] = [];
+  for (const f of [...rootData.folders, ...inboxData.folders]) {
+    if (!seen.has(f.id)) {
+      seen.add(f.id);
+      allFolders.push(f);
+    }
+  }
+
+  // Sort: well-known folders first, then alphabetical
   const WELL_KNOWN_ORDER = ['Inbox', 'Drafts', 'Sent Items', 'Deleted Items', 'Junk Email'];
-  const sorted = (data.value ?? []).sort((a, b) => {
+  const sorted = allFolders.sort((a, b) => {
     const ai = WELL_KNOWN_ORDER.indexOf(a.displayName);
     const bi = WELL_KNOWN_ORDER.indexOf(b.displayName);
     if (ai !== -1 && bi !== -1) return ai - bi;
@@ -140,5 +180,14 @@ Deno.serve(async (req) => {
     })),
   ];
 
-  return json({ folders, mailbox });
+  // Include partial error info if one of the two calls failed
+  const warnings: string[] = [];
+  if (rootData.error) warnings.push(`Root folders: ${rootData.error}`);
+  if (inboxData.error) warnings.push(`Inbox children: ${inboxData.error}`);
+
+  return json({
+    folders,
+    mailbox,
+    ...(warnings.length ? { warnings } : {}),
+  });
 });

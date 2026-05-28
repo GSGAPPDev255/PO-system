@@ -2457,7 +2457,6 @@ const FUNCTIONS: FnStatus[] = [
   { name: 'dispatch-scheduled-approvals', label: 'Scheduled approval send', schedule: 'Every 5 minutes' },
   { name: 'reminder-scheduler',           label: 'Reminder scheduler',     schedule: 'Daily · 08:00 UTC' },
   { name: 'finance-digest',               label: 'Finance digest',         schedule: 'Daily · 08:30 UTC' },
-  { name: 'sync-approvers',               label: 'Sync approvers',         schedule: 'Daily · 09:00 UTC' },
   { name: 'gemini-processor',             label: 'Gemini processor',       schedule: 'On-demand' },
   { name: 'send-approval',                label: 'Send approval',          schedule: 'On-demand' },
   { name: 'process-approval',             label: 'Process approval',       schedule: 'On-demand' },
