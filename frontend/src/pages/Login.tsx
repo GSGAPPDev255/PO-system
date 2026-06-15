@@ -101,7 +101,7 @@ export default function Login() {
               icon={<InvoiceIcon />}
               accent="#00B4D8"
               label="Invoices"
-              description="Email intake → Gemini OCR → Finance review → Approver sign-off → Sage export"
+              description="Email intake → AI extraction → Finance review → Approver sign-off → Sage export"
             />
             <PillarCard
               icon={<ExpenseIcon />}

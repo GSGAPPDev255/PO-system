@@ -263,7 +263,7 @@ export default function ExpenseReview() {
             <div className="card" style={{ marginTop: 16, padding: 16 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent-text)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)' }} />
-                AI Extraction · Gemini OCR
+                AI Extraction
               </div>
               {[
                 { key: 'merchant_name', label: 'Merchant' },

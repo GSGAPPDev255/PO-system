@@ -87,7 +87,7 @@ function OcrScanningBanner() {
       <div>
         <div style={styles.scanTitle}>Scanning your receipt…</div>
         <div style={styles.scanBody}>
-          Gemini AI is reading your receipt — merchant, date and amount will fill in automatically.
+          AI is reading your receipt — merchant, date and amount will fill in automatically.
         </div>
       </div>
     </div>
