@@ -342,6 +342,36 @@ export default function InvoiceReview() {
     }
   };
 
+  // Reopen a filed invoice (approved_ready_export) back to finance review so a
+  // missing field — e.g. a nominal code — can be corrected, then re-filed.
+  const handleUnfile = async () => {
+    setFiling(true);
+    setSaveError(null);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const { error } = await supabase
+        .from('purchase_orders')
+        .update({ status: 'pending_finance_review', updated_by_id: user?.id })
+        .eq('id', id!);
+      if (error) throw error;
+      await supabase.from('audit_log').insert({
+        purchase_order_id: id,
+        action: 'status_changed',
+        actor_id: user?.id,
+        actor_email: user?.email,
+        actor_display: 'Finance',
+        new_values: { status: 'pending_finance_review' },
+        metadata: { reason: 'Reopened by finance to correct a field', kind: 'unfiled' },
+      });
+      qc.invalidateQueries({ queryKey: ['invoices'] });
+      qc.invalidateQueries({ queryKey: ['invoice', id] });
+    } catch (e) {
+      setSaveError([(e as Error).message]);
+    } finally {
+      setFiling(false);
+    }
+  };
+
   const handleDismiss = async () => {
     setShowDismissConfirm(false);
     setDismissing(true);
@@ -460,6 +490,23 @@ export default function InvoiceReview() {
                     onSend={(scheduledAt) => { void handleMarkReady(scheduledAt); }}
                   />
                 )}
+              </div>
+            )}
+
+            {poData.status === 'approved_ready_export' && (
+              <div style={styles.headerActions}>
+                <div style={styles.approvalBtnWrap}>
+                  <button
+                    className="btn"
+                    style={{ ...styles.approvalBtn, background: 'var(--glass)', color: 'var(--ink)', borderColor: 'var(--border)' }}
+                    onClick={handleUnfile}
+                    disabled={filing}
+                    title="Reopen this filed invoice for editing — e.g. to add a missing nominal code"
+                  >
+                    {filing ? 'Reopening…' : '↩ Reopen for editing'}
+                  </button>
+                  <span style={styles.approvalHint}>Filed &amp; ready for export — reopen to correct a field</span>
+                </div>
               </div>
             )}
           </div>
