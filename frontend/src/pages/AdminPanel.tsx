@@ -1722,6 +1722,21 @@ interface MailFolder {
   totalItemCount: number;
 }
 
+interface PollResult {
+  mailbox: string;
+  company: string;
+  folder: string;
+  dry_run: boolean;
+  unread_found: number;
+  processed: number;
+  skipped: number;
+  duplicates: number;
+  reminders: number;
+  would_process: number;
+  errors: string[];
+  messages: Array<{ subject: string; from: string; intent: string; has_attachments: boolean; action: string; summary: string }>;
+}
+
 function CompaniesTab() {
   const [companies, setCompanies]       = useState<Company[]>([]);
   const [mailboxes, setMailboxes]       = useState<Mailbox[]>([]);
@@ -1742,6 +1757,12 @@ function CompaniesTab() {
   const [foldersLoading, setFoldersLoading]   = useState(false);
   const [foldersError, setFoldersError]       = useState<string | null>(null);
   const [savingFolder, setSavingFolder]       = useState<string | null>(null);
+
+  // Per-mailbox poll (test / force) state
+  const [pollResultFor, setPollResultFor] = useState<string | null>(null); // mailbox.id
+  const [pollResult, setPollResult]       = useState<PollResult | null>(null);
+  const [pollError, setPollError]         = useState<string | null>(null);
+  const [polling, setPolling]             = useState<string | null>(null); // mailbox.id being polled
 
   function flash(m: string, type: 'success' | 'error' = 'success') {
     setMsg(m); setMsgType(type);
@@ -1865,6 +1886,30 @@ function CompaniesTab() {
     setSavingFolder(null);
     setFolderPickerFor(null);
     await load();
+  }
+
+  async function pollMailbox(m: Mailbox, dryRun: boolean) {
+    setPolling(m.id);
+    setPollResultFor(m.id);
+    setPollResult(null);
+    setPollError(null);
+    setFolderPickerFor(null); // close folder picker if open on this row
+    try {
+      const { data, error } = await supabase.functions.invoke('poll-mailbox', {
+        body: { mailbox_id: m.id, dry_run: dryRun },
+      });
+      if (data?.error) throw new Error(data.error + (data.detail ? ` — ${data.detail}` : ''));
+      if (error) throw new Error(error.message);
+      setPollResult(data as PollResult);
+      // A live poll may have created POs — refresh nothing here, but flash a hint.
+      if (!dryRun && (data as PollResult).processed > 0) {
+        flash(`${(data as PollResult).processed} invoice(s) imported from ${m.email}.`);
+      }
+    } catch (err) {
+      setPollError((err as Error).message);
+    } finally {
+      setPolling(null);
+    }
   }
 
   async function toggleMailbox(m: Mailbox) {
@@ -2063,7 +2108,17 @@ function CompaniesTab() {
                                 </span>
                               </td>
                               <td style={{ ...s.td, textAlign: 'right' }}>
-                                <div style={{ display: 'inline-flex', gap: 6 }}>
+                                <div style={{ display: 'inline-flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                                  <button className="btn" style={co.testBtn} disabled={polling === m.id}
+                                    onClick={() => pollMailbox(m, true)}
+                                    title="Dry run — shows what would be picked up without creating POs or marking emails read">
+                                    {polling === m.id ? '…' : 'Test'}
+                                  </button>
+                                  <button className="btn" style={co.pollBtn} disabled={polling === m.id}
+                                    onClick={() => pollMailbox(m, false)}
+                                    title="Force a real poll now — imports invoices and marks emails read">
+                                    {polling === m.id ? 'Polling…' : 'Poll now'}
+                                  </button>
                                   <button className="btn" style={s.btnSecondary} disabled={toggling === m.id}
                                     onClick={() => toggleMailbox(m)}>
                                     {toggling === m.id ? '…' : m.is_active ? 'Pause' : 'Resume'}
@@ -2126,6 +2181,76 @@ function CompaniesTab() {
                                             </button>
                                           );
                                         })}
+                                      </div>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                            {/* Poll result row */}
+                            {pollResultFor === m.id && (polling === m.id || pollResult || pollError) && (
+                              <tr key={`${m.id}-poll-result`}>
+                                <td colSpan={5} style={{ padding: '0 0 6px', background: 'var(--paper)' }}>
+                                  <div style={co.pollWrap}>
+                                    <div style={co.pollHeader}>
+                                      <span style={co.pollTitle}>
+                                        {polling === m.id
+                                          ? `Polling ${m.email}…`
+                                          : pollResult?.dry_run
+                                          ? `Test result — ${m.email} (folder: ${pollResult?.folder})`
+                                          : `Poll result — ${m.email} (folder: ${pollResult?.folder})`}
+                                      </span>
+                                      <button style={co.folderPickerClose} onClick={() => { setPollResultFor(null); setPollResult(null); setPollError(null); }}>✕</button>
+                                    </div>
+
+                                    {polling === m.id && (
+                                      <div style={co.folderPickerMsg}>Contacting Microsoft 365 and classifying unread emails…</div>
+                                    )}
+
+                                    {pollError && (
+                                      <div style={co.folderPickerErr}><strong>Error:</strong> {pollError}</div>
+                                    )}
+
+                                    {pollResult && polling !== m.id && (
+                                      <div style={{ padding: '12px 14px' }}>
+                                        {pollResult.dry_run && (
+                                          <div style={co.pollDryNote}>
+                                            🧪 Test mode — nothing was imported and no emails were marked read.
+                                          </div>
+                                        )}
+                                        <div style={co.pollStats}>
+                                          <span style={co.pollStat}><strong>{pollResult.unread_found}</strong> unread found</span>
+                                          {pollResult.dry_run
+                                            ? <span style={{ ...co.pollStat, ...co.pollStatGood }}><strong>{pollResult.would_process}</strong> would import</span>
+                                            : <span style={{ ...co.pollStat, ...co.pollStatGood }}><strong>{pollResult.processed}</strong> imported</span>}
+                                          <span style={co.pollStat}><strong>{pollResult.skipped}</strong> skipped</span>
+                                          {pollResult.duplicates > 0 && <span style={co.pollStat}><strong>{pollResult.duplicates}</strong> duplicate</span>}
+                                          {pollResult.reminders > 0 && <span style={co.pollStat}><strong>{pollResult.reminders}</strong> reminder</span>}
+                                        </div>
+
+                                        {pollResult.errors.length > 0 && (
+                                          <div style={co.folderPickerErr}>
+                                            {pollResult.errors.map((e, i) => <div key={i}>⚠️ {e}</div>)}
+                                          </div>
+                                        )}
+
+                                        {pollResult.messages.length > 0 ? (
+                                          <div style={co.pollMsgList}>
+                                            {pollResult.messages.map((msg, i) => (
+                                              <div key={i} style={co.pollMsgRow}>
+                                                <span style={pollMsgIntentStyle(msg.intent)}>{msg.intent}</span>
+                                                <span style={co.pollMsgSubject} title={msg.subject}>
+                                                  {msg.has_attachments ? '📎 ' : ''}{msg.subject}
+                                                </span>
+                                                <span style={co.pollMsgAction}>{msg.action}</span>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        ) : (
+                                          <div style={{ ...co.folderPickerMsg, padding: '8px 0 0' }}>
+                                            No unread emails in this folder right now.
+                                          </div>
+                                        )}
                                       </div>
                                     )}
                                   </div>
@@ -2302,7 +2427,120 @@ const co: Record<string, React.CSSProperties> = {
     fontFamily: 'var(--font-mono)',
     marginLeft: 2,
   },
+
+  // ── Poll now / Test ──────────────────────────────────────────────────────
+  testBtn: {
+    background: 'rgba(123,97,255,0.10)',
+    color: '#7b61ff',
+    border: '1px solid rgba(123,97,255,0.30)',
+  },
+  pollBtn: {
+    background: 'rgba(6,214,160,0.12)',
+    color: 'var(--success)',
+    border: '1px solid rgba(6,214,160,0.30)',
+  },
+  pollWrap: {
+    margin: '2px 16px 10px',
+    background: 'var(--paper-bright)',
+    border: '1px solid var(--border)',
+    borderRadius: 10,
+    boxShadow: '0 6px 24px rgba(0,0,0,0.06)',
+    overflow: 'hidden',
+  },
+  pollHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '10px 14px',
+    borderBottom: '1px solid var(--line)',
+    background: 'rgba(6,214,160,0.04)',
+  },
+  pollTitle: { fontSize: 12, color: 'var(--ink-muted)', fontWeight: 600 },
+  pollDryNote: {
+    fontSize: 11.5,
+    color: '#7b61ff',
+    background: 'rgba(123,97,255,0.07)',
+    border: '1px dashed rgba(123,97,255,0.3)',
+    borderRadius: 6,
+    padding: '6px 10px',
+    marginBottom: 10,
+  },
+  pollStats: {
+    display: 'flex',
+    flexWrap: 'wrap' as const,
+    gap: 8,
+    marginBottom: 10,
+  },
+  pollStat: {
+    fontSize: 11.5,
+    color: 'var(--ink-muted)',
+    padding: '3px 9px',
+    borderRadius: 6,
+    background: 'var(--paper)',
+    border: '1px solid var(--line)',
+  },
+  pollStatGood: {
+    color: 'var(--success)',
+    background: 'rgba(6,214,160,0.08)',
+    border: '1px solid rgba(6,214,160,0.25)',
+  },
+  pollMsgList: {
+    display: 'flex',
+    flexDirection: 'column' as const,
+    gap: 4,
+    marginTop: 2,
+  },
+  pollMsgRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    padding: '6px 8px',
+    borderRadius: 6,
+    background: 'var(--paper)',
+    fontSize: 12,
+  },
+  pollMsgSubject: {
+    flex: 1,
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap' as const,
+    color: 'var(--ink)',
+  },
+  pollMsgAction: {
+    fontSize: 10.5,
+    fontFamily: 'var(--font-mono)',
+    color: 'var(--ink-faint)',
+    flexShrink: 0,
+  },
 };
+
+// Intent badge colour by classification
+function pollMsgIntentStyle(intent: string): React.CSSProperties {
+  const map: Record<string, { bg: string; color: string }> = {
+    new_invoice:       { bg: 'rgba(6,214,160,0.12)',  color: 'var(--success)' },
+    payment_reminder:  { bg: 'rgba(154,107,30,0.12)', color: 'var(--warning)' },
+    statement:         { bg: 'rgba(45,85,114,0.12)',  color: 'var(--info)' },
+    remittance_advice: { bg: 'rgba(45,85,114,0.12)',  color: 'var(--info)' },
+    credit_note:       { bg: 'rgba(123,97,255,0.12)', color: '#7b61ff' },
+    skip:              { bg: 'var(--glass)',          color: 'var(--ink-faint)' },
+  };
+  const t = map[intent] ?? { bg: 'var(--glass)', color: 'var(--ink-muted)' };
+  return {
+    fontSize: 9.5,
+    fontWeight: 700,
+    fontFamily: 'var(--font-mono)',
+    textTransform: 'uppercase',
+    letterSpacing: '0.06em',
+    padding: '2px 7px',
+    borderRadius: 5,
+    background: t.bg,
+    color: t.color,
+    flexShrink: 0,
+    width: 110,
+    textAlign: 'center',
+  };
+}
 
 // ─── Alerts Tab ───────────────────────────────────────────────────────────────
 

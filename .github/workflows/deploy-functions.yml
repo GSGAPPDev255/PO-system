@@ -32,6 +32,9 @@ jobs:
           supabase functions deploy reminder-scheduler --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
           supabase functions deploy sync-approvers     --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
           supabase functions deploy admin-actions      --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
+          supabase functions deploy list-mail-folders  --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
+          supabase functions deploy diagnose-graph     --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
+          supabase functions deploy poll-mailbox       --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
