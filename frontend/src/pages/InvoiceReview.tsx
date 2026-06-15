@@ -50,6 +50,22 @@ export default function InvoiceReview() {
   const [extracting, setExtracting] = useState(false);
   const [extractError, setExtractError] = useState<string | null>(null);
   const [resubmitting, setResubmitting] = useState(false);
+  const [filing, setFiling] = useState(false);
+  // Approval workflow toggle. When false (trial mode), finance files invoices
+  // straight to ready-for-export with no approver step. Default true (safe)
+  // until the setting loads.
+  const [approvalFlowEnabled, setApprovalFlowEnabled] = useState(true);
+
+  useEffect(() => {
+    supabase
+      .from('system_settings')
+      .select('value')
+      .eq('key', 'approval_flow_enabled')
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data) setApprovalFlowEnabled(String(data.value).toLowerCase() !== 'false');
+      });
+  }, []);
 
   useEffect(() => {
     if (po) {
@@ -233,6 +249,56 @@ export default function InvoiceReview() {
     }
   };
 
+  // Trial mode (approval flow disabled): finance files the invoice straight to
+  // ready-for-export. No approver required, no approval email sent.
+  const validateForFiling = (): string[] => {
+    const errors: string[] = [];
+    if (!form.supplier_name?.trim()) errors.push('Supplier Name is required');
+    if (!form.transaction_date) errors.push('Transaction Date is required');
+    const net = Number(form.net_amount ?? 0);
+    const vat = Number(form.vat_amount ?? 0);
+    const gross = Number(form.gross_amount ?? 0);
+    if (gross > 0 && Math.abs(net + vat - gross) > 0.01) {
+      errors.push(`Net (£${net.toFixed(2)}) + VAT (£${vat.toFixed(2)}) must equal Gross (£${gross.toFixed(2)})`);
+    }
+    return errors;
+  };
+
+  const handleFileInvoice = async () => {
+    const validationErrors = validateForFiling();
+    if (validationErrors.length > 0) {
+      setSaveError(validationErrors);
+      return;
+    }
+    setFiling(true);
+    setSaveError(null);
+    try {
+      await handleSave();
+      const { data: { user } } = await supabase.auth.getUser();
+      const { error } = await supabase
+        .from('purchase_orders')
+        .update({ status: 'approved_ready_export', updated_by_id: user?.id })
+        .eq('id', id!);
+      if (error) throw error;
+      await supabase.from('audit_log').insert({
+        purchase_order_id: id,
+        action: 'status_changed',
+        actor_id: user?.id,
+        actor_email: user?.email,
+        actor_display: 'Finance',
+        new_values: { status: 'approved_ready_export' },
+        metadata: { reason: 'Filed by finance (approval workflow disabled)', kind: 'filed_no_approval' },
+      });
+      qc.invalidateQueries({ queryKey: ['invoices'] });
+      qc.invalidateQueries({ queryKey: ['invoice', id] });
+      navigate('/');
+    } catch (e) {
+      setSaveError([(e as Error).message]);
+    } finally {
+      setFiling(false);
+    }
+  };
+
   const handleResubmit = async () => {
     const validationErrors = validateReadyForApproval();
     if (validationErrors.length > 0) {
@@ -346,7 +412,26 @@ export default function InvoiceReview() {
                 >
                   {saving ? 'Saving…' : 'Save Draft'}
                 </button>
-                {poData.status === 'rejected' ? (
+                {!approvalFlowEnabled ? (
+                  /* Trial mode — file straight to ready-for-export, no approver */
+                  <div style={styles.approvalBtnWrap}>
+                    <button
+                      className="btn"
+                      style={{
+                        ...styles.approvalBtn,
+                        background: 'linear-gradient(135deg, #06d6a0 0%, #00b4d8 100%)',
+                        borderColor: '#06d6a0',
+                      }}
+                      onClick={handleFileInvoice}
+                      disabled={filing}
+                      title="Save and file this invoice ready for CSV export (no approver step)"
+                    >
+                      {filing ? 'Filing…' : '🗂 File invoice'}
+                      {!filing && <span style={styles.approvalArrow}>→</span>}
+                    </button>
+                    <span style={styles.approvalHint}>Files ready for export — no approver needed</span>
+                  </div>
+                ) : poData.status === 'rejected' ? (
                   <div style={styles.approvalBtnWrap}>
                     <button
                       className="btn"

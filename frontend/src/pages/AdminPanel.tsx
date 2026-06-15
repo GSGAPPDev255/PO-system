@@ -2545,6 +2545,7 @@ function pollMsgIntentStyle(intent: string): React.CSSProperties {
 // ─── Alerts Tab ───────────────────────────────────────────────────────────────
 
 const ALERT_KEYS = [
+  'approval_flow_enabled',
   'alert_cc_emails', 'admin_alert_email', 'reminder_days', 'max_reminders',
   'batch_send_enabled', 'batch_send_time', 'batch_send_days',
 ];
@@ -2607,6 +2608,32 @@ function AlertsTab() {
 
       <div style={s.card}>
         <div style={s.settingsGrid}>
+          {/* ── Approval workflow toggle ──────────────────────────────────── */}
+          <div style={{ padding: '18px 26px', borderBottom: '1px solid var(--line)' }}>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 700, color: 'var(--accent-text)', letterSpacing: '0.18em', textTransform: 'uppercase' }}>§ Approval workflow</div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 20, marginTop: 12 }}>
+              <div style={{ maxWidth: 560 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink)' }}>
+                  {(settings['approval_flow_enabled'] ?? 'true').toLowerCase() === 'false'
+                    ? 'Trial mode — finance files invoices directly'
+                    : 'Full approval workflow active'}
+                </div>
+                <div style={{ fontSize: 12.5, color: 'var(--ink-muted)', marginTop: 5, lineHeight: 1.55 }}>
+                  When <strong>enabled</strong>, finance assigns an approver and sends each invoice for email sign-off before it can be exported.
+                  When <strong>disabled</strong>, finance reviews, extracts and files invoices straight to ready-for-export — no approver, no approval emails.
+                </div>
+              </div>
+              <select
+                style={{ ...s.input, width: 150, flexShrink: 0 }}
+                value={(settings['approval_flow_enabled'] ?? 'true').toLowerCase() === 'false' ? 'false' : 'true'}
+                onChange={(e) => setSettings({ ...settings, approval_flow_enabled: e.target.value })}
+              >
+                <option value="true">Enabled</option>
+                <option value="false">Disabled (trial)</option>
+              </select>
+            </div>
+          </div>
+
           <SettingRow
             label="CC emails on approvals"
             desc={descs['alert_cc_emails'] ?? 'Comma-separated emails CCed on all approval request emails'}
