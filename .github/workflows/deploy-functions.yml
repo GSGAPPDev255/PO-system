@@ -74,8 +74,10 @@ jobs:
       - name: Disable JWT verification for user-facing functions
         run: |
           # These functions handle auth internally or are called server-to-server
-          # and must not be blocked by the platform gateway verify_jwt check
-          for fn in invoice-processor send-approval process-approval generate-csv admin-actions sync-approvers reminder-scheduler; do
+          # and must not be blocked by the platform gateway verify_jwt check.
+          # email-intake is triggered by the pg_cron scheduler (no user JWT), so
+          # it must stay verify_jwt=false too.
+          for fn in email-intake invoice-processor send-approval process-approval generate-csv admin-actions sync-approvers reminder-scheduler; do
             curl -X PATCH \
               "https://api.supabase.com/v1/projects/${{ secrets.SUPABASE_PROJECT_REF }}/functions/$fn" \
               -H "Authorization: Bearer ${{ secrets.SUPABASE_ACCESS_TOKEN }}" \
