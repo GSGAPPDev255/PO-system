@@ -5,8 +5,9 @@
  * touching the global email-intake cron and without affecting other mailboxes.
  *
  * Body: { mailbox_id: string, dry_run?: boolean }
- *   - dry_run = true  → classify + report what WOULD happen. Does NOT create
- *                       POs, download attachments, or mark anything read.
+ *   - dry_run = true  → classify + report what WOULD happen (per attachment).
+ *                       Reads attachments to count accurately, but creates NO
+ *                       POs/files and marks nothing read.
  *   - dry_run = false → full processing identical to email-intake (creates POs
  *                       for genuine new invoices, marks messages read).
  *
@@ -304,15 +305,8 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      // new_invoice with attachments
-      if (dryRun) {
-        record.action = 'would create PO';
-        result.would_process++;
-        result.messages.push(record);
-        continue;
-      }
-
-      // ── Real processing ───────────────────────────────────────────────────
+      // ── new_invoice with attachments ──────────────────────────────────────
+      // Fetch attachments for both Test and live so the Test count is accurate.
       const { value: attachments } = await graphGet<{ value: GraphAttachment[] }>(
         `/users/${encodeURIComponent(mailboxEmail)}/messages/${message.id}/attachments`,
       );
@@ -320,97 +314,112 @@ Deno.serve(async (req) => {
       if (invoiceAttachments.length === 0) {
         record.action = 'skip (no supported attachment)';
         result.skipped++;
-        await markMessageRead(mailboxEmail, message.id);
+        if (!dryRun) await markMessageRead(mailboxEmail, message.id);
         result.messages.push(record);
         continue;
       }
-      const bestAttachment =
-        invoiceAttachments.find((a) => DOCUMENT_MIME_TYPES[a.contentType]) ?? invoiceAttachments[0];
 
-      // Decode bytes first — needed for both the content hash and the upload.
-      const bytes = Uint8Array.from(atob(bestAttachment.contentBytes), (c) => c.charCodeAt(0));
-      const fileHash = await sha256hex(bytes);
+      // Process EVERY document attachment (PDF/Word/Excel) as its own PO — one
+      // email may carry several invoices. Images count only when there's no
+      // document (e.g. a photographed invoice); otherwise they're skipped as
+      // likely logos/signatures. Each is hash-deduped independently.
+      const documentAttachments = invoiceAttachments.filter((a) => DOCUMENT_MIME_TYPES[a.contentType]);
+      const toProcess = documentAttachments.length > 0 ? documentAttachments : [invoiceAttachments[0]];
 
-      // ── Hash-based duplicate detection (matches email-intake) ───────────────
-      // Catches identical files regardless of filename, sender or subject —
-      // covers resent / forwarded invoices and payment chasers with the same PDF.
-      const { data: existingFile } = await supabaseAdmin
-        .from('invoice_files').select('id')
-        .eq('file_hash', fileHash)
-        .limit(1).maybeSingle();
+      for (const attachment of toProcess) {
+        const attRecord = { ...record, action: '' };
 
-      if (existingFile) {
-        const { data: existingPO } = await supabaseAdmin
-          .from('purchase_orders').select('id')
-          .eq('invoice_file_id', existingFile.id)
+        // Decode bytes — needed for both the content hash and the upload.
+        const bytes = Uint8Array.from(atob(attachment.contentBytes), (c) => c.charCodeAt(0));
+        const fileHash = await sha256hex(bytes);
+
+        // Hash-based duplicate detection (matches email-intake) — catches a
+        // resent/forwarded invoice or payment chaser with the same PDF.
+        const { data: existingFile } = await supabaseAdmin
+          .from('invoice_files').select('id')
+          .eq('file_hash', fileHash)
           .limit(1).maybeSingle();
+
+        if (existingFile) {
+          attRecord.action = 'duplicate';
+          result.duplicates++;
+          if (!dryRun) {
+            const { data: existingPO } = await supabaseAdmin
+              .from('purchase_orders').select('id')
+              .eq('invoice_file_id', existingFile.id)
+              .limit(1).maybeSingle();
+            await supabaseAdmin.from('audit_log').insert({
+              purchase_order_id: existingPO?.id ?? null,
+              action: 'duplicate_received',
+              actor_email: 'system@poll-mailbox',
+              actor_display: 'Manual poll (Admin)',
+              new_values: { email_from: message.from.emailAddress.address, email_subject: message.subject },
+              metadata: { type: 'duplicate_attachment', duplicate_of_file_id: existingFile.id, file_hash: fileHash, source: 'poll-mailbox' },
+            });
+          }
+          result.messages.push(attRecord);
+          continue;
+        }
+
+        // Test mode — report it would import, but create nothing.
+        if (dryRun) {
+          attRecord.action = 'would import';
+          result.would_process++;
+          result.messages.push(attRecord);
+          continue;
+        }
+
+        const poId = crypto.randomUUID();
+        const year = new Date().getFullYear();
+        const month = String(new Date().getMonth() + 1).padStart(2, '0');
+        const storagePath = `${year}/${month}/${poId}/${attachment.name}`;
+
+        const { error: storageError } = await supabaseAdmin.storage
+          .from('invoices').upload(storagePath, bytes, { contentType: attachment.contentType, upsert: false });
+        if (storageError) {
+          result.errors.push(`Storage upload failed (${attachment.name}): ${storageError.message}`);
+          continue;
+        }
+
+        const { data: fileRecord, error: fileError } = await supabaseAdmin
+          .from('invoice_files').insert({
+            storage_path: storagePath, bucket_name: 'invoices',
+            original_name: attachment.name, mime_type: attachment.contentType,
+            file_size_bytes: attachment.size, email_from: message.from.emailAddress.address,
+            email_date: message.receivedDateTime, email_subject: message.subject,
+            file_hash: fileHash,
+          }).select().single();
+        if (fileError || !fileRecord) {
+          result.errors.push(`invoice_files insert failed (${attachment.name}): ${fileError?.message}`);
+          continue;
+        }
+
+        const { error: poError } = await supabaseAdmin
+          .from('purchase_orders').insert({
+            id: poId,
+            invoice_file_id: fileRecord.id,
+            status: 'pending_finance_review',
+            company: company.slug,
+            supplier_name: classification.supplier_name ?? null,
+          }).select().single();
+        if (poError) {
+          result.errors.push(`purchase_orders insert failed (${attachment.name}): ${poError.message}`);
+          continue;
+        }
+
         await supabaseAdmin.from('audit_log').insert({
-          purchase_order_id: existingPO?.id ?? null,
-          action: 'duplicate_received',
-          actor_email: 'system@poll-mailbox',
-          actor_display: 'Manual poll (Admin)',
-          new_values: { email_from: message.from.emailAddress.address, email_subject: message.subject },
-          metadata: { type: 'duplicate_attachment', duplicate_of_file_id: existingFile.id, file_hash: fileHash, source: 'poll-mailbox' },
+          purchase_order_id: poId, action: 'created',
+          actor_email: 'system@poll-mailbox', actor_display: 'Manual poll (Admin)',
+          new_values: { email_from: message.from.emailAddress.address, email_subject: message.subject, attachment: attachment.name, company: company.slug },
+          metadata: { classification_intent: classification.intent, classification_summary: classification.summary, company: company.slug, source: 'poll-mailbox' },
         });
-        record.action = 'duplicate';
-        result.duplicates++;
-        await markMessageRead(mailboxEmail, message.id);
-        result.messages.push(record);
-        continue;
+
+        attRecord.action = 'created PO';
+        result.processed++;
+        result.messages.push(attRecord);
       }
 
-      const poId = crypto.randomUUID();
-      const year = new Date().getFullYear();
-      const month = String(new Date().getMonth() + 1).padStart(2, '0');
-      const storagePath = `${year}/${month}/${poId}/${bestAttachment.name}`;
-
-      const { error: storageError } = await supabaseAdmin.storage
-        .from('invoices').upload(storagePath, bytes, { contentType: bestAttachment.contentType, upsert: false });
-      if (storageError) {
-        result.errors.push(`Storage upload failed: ${storageError.message}`);
-        result.messages.push(record);
-        continue;
-      }
-
-      const { data: fileRecord, error: fileError } = await supabaseAdmin
-        .from('invoice_files').insert({
-          storage_path: storagePath, bucket_name: 'invoices',
-          original_name: bestAttachment.name, mime_type: bestAttachment.contentType,
-          file_size_bytes: bestAttachment.size, email_from: message.from.emailAddress.address,
-          email_date: message.receivedDateTime, email_subject: message.subject,
-          file_hash: fileHash,
-        }).select().single();
-      if (fileError || !fileRecord) {
-        result.errors.push(`invoice_files insert failed: ${fileError?.message}`);
-        result.messages.push(record);
-        continue;
-      }
-
-      const { error: poError } = await supabaseAdmin
-        .from('purchase_orders').insert({
-          id: poId,
-          invoice_file_id: fileRecord.id,
-          status: 'pending_finance_review',
-          company: company.slug,
-          supplier_name: classification.supplier_name ?? null,
-        }).select().single();
-      if (poError) {
-        result.errors.push(`purchase_orders insert failed: ${poError.message}`);
-        result.messages.push(record);
-        continue;
-      }
-
-      await supabaseAdmin.from('audit_log').insert({
-        purchase_order_id: poId, action: 'created',
-        actor_email: 'system@poll-mailbox', actor_display: 'Manual poll (Admin)',
-        new_values: { email_from: message.from.emailAddress.address, email_subject: message.subject, attachment: bestAttachment.name, company: company.slug },
-        metadata: { classification_intent: classification.intent, classification_summary: classification.summary, company: company.slug, source: 'poll-mailbox' },
-      });
-
-      record.action = 'created PO';
-      result.processed++;
-      await markMessageRead(mailboxEmail, message.id);
-      result.messages.push(record);
+      if (!dryRun) await markMessageRead(mailboxEmail, message.id);
     } catch (err) {
       result.errors.push(`[${message.subject ?? 'msg'}] ${(err as Error).message}`);
     }

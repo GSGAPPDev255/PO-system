@@ -259,17 +259,16 @@ async function processMailbox(
         continue;
       }
 
-      // Prefer PDF/Word/Excel over images — avoids picking up logos or signature
-      // images when the real invoice is a document. Falls back to first image only
-      // if no document-type attachment exists.
-      const bestAttachment =
-        invoiceAttachments.find((a) => DOCUMENT_MIME_TYPES[a.contentType]) ??
-        invoiceAttachments[0];
-      if (invoiceAttachments.length > 1) {
-        results.attachments_skipped += invoiceAttachments.length - 1;
-      }
+      // Process EVERY document attachment (PDF/Word/Excel) as its own PO — a
+      // single email may carry several separate invoices. Images count as the
+      // invoice only when there's no document attachment (e.g. a photographed
+      // invoice); otherwise images are skipped as likely logos/signatures.
+      // Each attachment is hash-deduped independently below.
+      const documentAttachments = invoiceAttachments.filter((a) => DOCUMENT_MIME_TYPES[a.contentType]);
+      const toProcess = documentAttachments.length > 0 ? documentAttachments : [invoiceAttachments[0]];
+      results.attachments_skipped += invoiceAttachments.length - toProcess.length;
 
-      for (const attachment of [bestAttachment]) {
+      for (const attachment of toProcess) {
         // Decode bytes first — needed for both hash check and storage upload
         const bytes = Uint8Array.from(atob(attachment.contentBytes), (c) => c.charCodeAt(0));
         const fileHash = await sha256hex(bytes);
