@@ -53,11 +53,14 @@ jobs:
 
       - name: Set Edge Function secrets
         run: |
+          # NOTE: AZURE_CLIENT_SECRET is intentionally NOT synced here.
+          # It is managed directly in the Supabase dashboard (Edge Function
+          # secrets) so a deploy can never silently overwrite a freshly-rotated
+          # Azure client secret with a stale GitHub copy. Rotate it in Supabase.
           supabase secrets set \
             GEMINI_API_KEY="${{ secrets.GEMINI_API_KEY }}" \
             AZURE_TENANT_ID="${{ secrets.AZURE_TENANT_ID }}" \
             AZURE_CLIENT_ID="${{ secrets.AZURE_CLIENT_ID }}" \
-            AZURE_CLIENT_SECRET="${{ secrets.AZURE_CLIENT_SECRET }}" \
             FINANCE_MAILBOX="${{ secrets.FINANCE_MAILBOX }}" \
             FRONTEND_URL="${{ secrets.FRONTEND_URL }}" \
             REMINDER_DAYS="${{ secrets.REMINDER_DAYS }}" \
