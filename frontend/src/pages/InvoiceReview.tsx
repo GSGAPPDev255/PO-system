@@ -655,6 +655,7 @@ export default function InvoiceReview() {
                 <label style={styles.label}>Supplier Ref Code</label>
                 <SupplierPicker
                   value={String(form.supplier_ref_code ?? '')}
+                  company={(poData as unknown as Record<string, unknown>).company as string | null}
                   disabled={!isEditable}
                   allowCreate={isEditable}
                   onChange={(code) => setForm((prev) => ({ ...prev, supplier_ref_code: code || null }))}

@@ -11,6 +11,7 @@ export interface Supplier {
 
 interface Props {
   value: string;                                 // current supplier_ref_code
+  company?: string | null;                       // scope: only this company's suppliers
   onChange: (code: string) => void;              // updates supplier_ref_code
   onSelect?: (supplier: Supplier) => void;       // optional: when a row is picked
   disabled?: boolean;
@@ -20,36 +21,40 @@ interface Props {
   style?: React.CSSProperties;
 }
 
-// Shared in-memory cache so we only fetch the list once per session.
-let cache: Supplier[] | null = null;
-let cachePromise: Promise<Supplier[]> | null = null;
+// Supplier lists are scoped per company, so cache one list per company slug.
+const cache = new Map<string, Supplier[]>();
+const cachePromise = new Map<string, Promise<Supplier[]>>();
 
-async function loadSuppliers(): Promise<Supplier[]> {
-  if (cache) return cache;
-  if (cachePromise) return cachePromise;
-  cachePromise = (async () => {
+async function loadSuppliers(company: string): Promise<Supplier[]> {
+  if (cache.has(company)) return cache.get(company)!;
+  if (cachePromise.has(company)) return cachePromise.get(company)!;
+  const promise = (async () => {
     const { data, error } = await supabase
       .from('suppliers')
       .select('code, short_name, name, contact_email, payment_group')
       .eq('is_active', true)
+      .eq('company', company)
       .order('name', { ascending: true });
     if (error) {
       console.error('Failed to load suppliers:', error.message);
       return [];
     }
-    cache = (data ?? []) as Supplier[];
-    return cache;
+    const list = (data ?? []) as Supplier[];
+    cache.set(company, list);
+    return list;
   })();
-  return cachePromise;
+  cachePromise.set(company, promise);
+  return promise;
 }
 
-function bustCache() {
-  cache = null;
-  cachePromise = null;
+function bustCache(company: string) {
+  cache.delete(company);
+  cachePromise.delete(company);
 }
 
 export default function SupplierPicker({
   value,
+  company,
   onChange,
   onSelect,
   disabled,
@@ -72,7 +77,10 @@ export default function SupplierPicker({
   const [createError, setCreateError]   = useState<string | null>(null);
 
   useEffect(() => { setQuery(value ?? ''); }, [value]);
-  useEffect(() => { void loadSuppliers().then(setSuppliers); }, []);
+  useEffect(() => {
+    if (company) void loadSuppliers(company).then(setSuppliers);
+    else setSuppliers([]);
+  }, [company]);
 
   // Close on outside click
   useEffect(() => {
@@ -142,28 +150,32 @@ export default function SupplierPicker({
       setCreateError('Both code and name are required.');
       return;
     }
+    if (!company) {
+      setCreateError('No company set for this invoice — cannot add a supplier.');
+      return;
+    }
     setCreateSaving(true);
     setCreateError(null);
 
     const { data, error } = await supabase
       .from('suppliers')
-      .insert({ code, name, is_active: true })
+      .insert({ code, name, company, is_active: true })
       .select('code, short_name, name, contact_email, payment_group')
       .single();
 
     if (error) {
       setCreateError(
         error.code === '23505'
-          ? `Code "${code}" already exists — search for it above.`
+          ? `Code "${code}" already exists for this company — search for it above.`
           : error.message,
       );
       setCreateSaving(false);
       return;
     }
 
-    // Bust the shared cache and reload
-    bustCache();
-    const updated = await loadSuppliers();
+    // Bust this company's cache and reload
+    bustCache(company);
+    const updated = await loadSuppliers(company);
     setSuppliers(updated);
 
     pick(data as Supplier);
@@ -173,7 +185,7 @@ export default function SupplierPicker({
     setCreateSaving(false);
   }
 
-  const showCreateOption = allowCreate && !disabled && open && query.trim().length >= 1;
+  const showCreateOption = allowCreate && !disabled && !!company && open && query.trim().length >= 1;
 
   return (
     <div ref={wrapRef} style={{ position: 'relative', ...style }}>
