@@ -9,6 +9,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import type { Profile, UserRole } from '../lib/supabase';
+import SupplierImport from '../components/admin/SupplierImport';
 
 type Tab = 'users' | 'approvers' | 'suppliers' | 'nominals' | 'companies' | 'alerts' | 'system';
 
@@ -2262,6 +2263,8 @@ function CompaniesTab() {
                       </tbody>
                     </table>
                   )}
+
+                  <SupplierImport companySlug={c.slug} companyName={c.name} />
                 </div>
               )}
             </div>
