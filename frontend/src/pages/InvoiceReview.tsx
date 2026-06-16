@@ -86,6 +86,17 @@ export default function InvoiceReview() {
     if (vatLines[1]) setVat2(vatLines[1]);
   }, [vatLines]);
 
+  // Auto-populate nominal line 1's Transaction Value from the invoice Net amount.
+  // Only fills when line 1's value is still blank, so it never overwrites a
+  // manually entered value or a split across two nominal lines.
+  useEffect(() => {
+    const net = form.net_amount;
+    const current = nominal1.transaction_value;
+    if (net != null && Number(net) > 0 && (current == null || current === 0)) {
+      setNominal1((prev) => ({ ...prev, transaction_value: Number(net) }));
+    }
+  }, [form.net_amount, nominal1.transaction_value]);
+
   useEffect(() => {
     if (po?.invoice_file_id) {
       const fileData = (po as Record<string, unknown>).invoice_file as { storage_path?: string } | null;
@@ -637,7 +648,7 @@ export default function InvoiceReview() {
 
           <Section title="Supplier" number="01">
             <div style={styles.grid2}>
-              {f('account_number', 'Account Number')}
+              {f('account_number', 'Supplier Code')}
               {f('supplier_name', 'Supplier Name')}
               {f('supplier_ref', 'Supplier Ref')}
               <div style={styles.field}>
