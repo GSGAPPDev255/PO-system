@@ -211,6 +211,36 @@ Deno.serve(async (req) => {
     if (posError) throw new Error(`Failed to fetch POs: ${posError.message}`);
     if (!pos?.length) throw new Error('No approved POs found with the given IDs');
 
+    // ── Company access enforcement ────────────────────────────────────────────
+    // A CSV is per-company (one company's suppliers/nominals per Sage import),
+    // and the caller must have access to that company. Admins/auditors: any.
+    const { data: callerProfile } = await supabaseAdmin
+      .from('profiles').select('role').eq('id', user.id).single();
+    const callerRole = (callerProfile as { role?: string } | null)?.role;
+    const seesAll = callerRole === 'admin' || callerRole === 'auditor';
+
+    const exportCompanies = [...new Set(
+      pos.map((p) => (p as Record<string, unknown>).company).filter(Boolean),
+    )] as string[];
+    if (exportCompanies.length > 1) {
+      return new Response(
+        JSON.stringify({ error: 'All invoices in one export must belong to the same company' }),
+        { status: 422, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      );
+    }
+    const exportCompany = exportCompanies[0];
+    if (!seesAll && exportCompany) {
+      const { data: pca } = await supabaseAdmin
+        .from('profile_company_access').select('company').eq('profile_id', user.id);
+      const allowed = new Set((pca ?? []).map((r) => (r as { company: string }).company));
+      if (!allowed.has(exportCompany)) {
+        return new Response(
+          JSON.stringify({ error: 'You do not have access to this company' }),
+          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+        );
+      }
+    }
+
     const validationSummary: Record<string, ValidationResult> = {};
     const csvRows: string[][] = [];
     // PostedDate = today (the date we are generating the export for Sage)

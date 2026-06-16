@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { format } from 'date-fns';
 import { useInvoices, useNominalLinesBulk } from '../hooks/useInvoices';
 import { useCsvExports, useGenerateCsv } from '../hooks/useExport';
@@ -59,6 +59,36 @@ export default function ExportManagement() {
   const [result, setResult]       = useState<{ url: string; count: number } | null>(null);
   const [error, setError]         = useState<string | null>(null);
 
+  // Company scoping — a Sage CSV is always for a single company. Admins/auditors
+  // can export any company; everyone else only the companies they're granted.
+  const [companies, setCompanies] = useState<{ name: string; slug: string }[]>([]);
+  const [activeCompany, setActiveCompany] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const [companiesRes, accessRes, profileRes] = await Promise.all([
+        supabase.from('companies').select('name, slug').eq('is_active', true).order('name'),
+        supabase.from('profile_company_access').select('company').eq('profile_id', user.id),
+        supabase.from('profiles').select('role').eq('id', user.id).single(),
+      ]);
+      const allCompanies = (companiesRes.data as { name: string; slug: string }[]) ?? [];
+      const accessSlugs = (accessRes.data as { company: string }[] ?? []).map(r => r.company);
+      const role = (profileRes.data as { role?: string } | null)?.role;
+      const seesAll = role === 'admin' || role === 'auditor';
+      const visible = seesAll ? allCompanies : allCompanies.filter(c => accessSlugs.includes(c.slug));
+      setCompanies(visible);
+      setActiveCompany((cur) => cur ?? visible[0]?.slug ?? null);
+    })();
+  }, []);
+
+  // Only the active company's approved invoices are exportable at a time.
+  const companyPos = useMemo(
+    () => approvedPos.filter((p) => (p as unknown as Record<string, unknown>).company === activeCompany),
+    [approvedPos, activeCompany],
+  );
+
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -68,14 +98,17 @@ export default function ExportManagement() {
     });
   };
 
-  const selectAll   = () => setSelected(new Set(approvedPos.map((p) => p.id)));
+  const selectAll   = () => setSelected(new Set(companyPos.map((p) => p.id)));
   const clearAll    = () => setSelected(new Set());
   const selectReady = () => {
-    const readyIds = approvedPos
+    const readyIds = companyPos
       .filter((p) => checkReadiness(p as unknown as PoRecord, nominalByPo[p.id] ?? []).ready)
       .map((p) => p.id);
     setSelected(new Set(readyIds));
   };
+
+  // Switching company clears any cross-company selection (one CSV = one company).
+  useEffect(() => { setSelected(new Set()); setResult(null); }, [activeCompany]);
 
   const handleGenerate = async () => {
     if (selected.size === 0) return;
@@ -111,13 +144,13 @@ export default function ExportManagement() {
     v != null ? `£${Number(v).toLocaleString('en-GB', { minimumFractionDigits: 2 })}` : '—';
 
   // Aggregates for selected rows
-  const selectedPos = approvedPos.filter((p) => selected.has(p.id));
+  const selectedPos = companyPos.filter((p) => selected.has(p.id));
   const totalGross  = selectedPos.reduce((sum, p) => sum + Number(p.gross_amount || 0), 0);
   const incompleteSelected = selectedPos.filter(
     (p) => !checkReadiness(p as unknown as PoRecord, nominalByPo[p.id] ?? []).ready
   );
-  const readyCount   = approvedPos.filter((p) => checkReadiness(p as unknown as PoRecord, nominalByPo[p.id] ?? []).ready).length;
-  const missingCount = approvedPos.length - readyCount;
+  const readyCount   = companyPos.filter((p) => checkReadiness(p as unknown as PoRecord, nominalByPo[p.id] ?? []).ready).length;
+  const missingCount = companyPos.length - readyCount;
 
   return (
     <div style={styles.page}>
@@ -134,8 +167,36 @@ export default function ExportManagement() {
         </p>
       </div>
 
+      {/* Company selector — a CSV is generated per company */}
+      {companies.length > 0 ? (
+        <div style={styles.companyBar} className="animate-rise" role="tablist">
+          <span style={styles.companyBarLabel}>Company</span>
+          {companies.map((c) => (
+            <button
+              key={c.slug}
+              role="tab"
+              aria-selected={activeCompany === c.slug}
+              className="btn"
+              style={{
+                ...styles.companyTab,
+                ...(activeCompany === c.slug ? styles.companyTabActive : {}),
+              }}
+              onClick={() => setActiveCompany(c.slug)}
+            >
+              {c.name}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div style={styles.empty} className="animate-rise">
+          <div style={styles.emptyMark}>§</div>
+          <div style={styles.emptyTitle}>No company access.</div>
+          <div style={styles.emptyText}>Ask an admin to grant you access to a company.</div>
+        </div>
+      )}
+
       {/* Readiness summary strip */}
-      {approvedPos.length > 0 && (
+      {companyPos.length > 0 && (
         <div style={styles.readinessSummary} className="animate-rise">
           <div style={styles.readinessItem}>
             <span style={{ ...styles.readinessDot, background: 'var(--success)' }} />
@@ -167,14 +228,14 @@ export default function ExportManagement() {
           </div>
           <div style={styles.sectionActions}>
             <button className="btn" style={styles.linkBtn} onClick={selectAll}>
-              Select all <span style={styles.linkCount}>({approvedPos.length})</span>
+              Select all <span style={styles.linkCount}>({companyPos.length})</span>
             </button>
             <span style={styles.linkDiv} />
             <button className="btn" style={styles.linkBtn} onClick={clearAll}>Clear</button>
           </div>
         </div>
 
-        {approvedPos.length === 0 ? (
+        {companyPos.length === 0 ? (
           <div style={styles.empty}>
             <div style={styles.emptyMark}>§</div>
             <div style={styles.emptyTitle}>Nothing awaiting export.</div>
@@ -188,7 +249,7 @@ export default function ExportManagement() {
                   <th style={{ ...styles.th, width: 36 }}>
                     <input
                       type="checkbox"
-                      checked={selected.size === approvedPos.length && approvedPos.length > 0}
+                      checked={selected.size === companyPos.length && companyPos.length > 0}
                       onChange={(e) => e.target.checked ? selectAll() : clearAll()}
                     />
                   </th>
@@ -209,7 +270,7 @@ export default function ExportManagement() {
                 </tr>
               </thead>
               <tbody>
-                {approvedPos.map((po, idx) => {
+                {companyPos.map((po, idx) => {
                   const isSelected = selected.has(po.id);
                   const poLines    = nominalByPo[po.id] ?? [];
                   const n1         = poLines.find((l) => l.line_number === 1);
@@ -469,6 +530,21 @@ const styles: Record<string, React.CSSProperties> = {
   },
   titleEm: { fontStyle: 'italic', color: 'var(--accent)', fontVariationSettings: "'opsz' 144, 'SOFT' 100" },
   subtitle: { margin: '14px 0 0', maxWidth: 640, fontSize: 15, lineHeight: 1.6, color: 'var(--ink-muted)' },
+
+  // Company selector bar
+  companyBar: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  companyBarLabel: {
+    fontSize: 11, fontWeight: 600, color: 'var(--ink-muted)',
+    textTransform: 'uppercase', letterSpacing: '0.18em', marginRight: 4,
+  },
+  companyTab: {
+    padding: '7px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+    background: 'var(--glass, rgba(255,255,255,0.06))', color: 'var(--ink-muted)',
+    border: '1px solid var(--line)', borderRadius: 999,
+  },
+  companyTabActive: {
+    background: 'var(--accent-3)', borderColor: 'var(--accent-3)', color: '#fff',
+  },
 
   // Readiness summary strip
   readinessSummary: {
