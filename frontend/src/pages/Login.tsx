@@ -90,24 +90,18 @@ export default function Login() {
               <span style={styles.heroGradientText}>Every pound accounted for.</span>
             </h1>
             <p style={styles.heroLede}>
-              From supplier invoices to staff expenses — AI-assisted extraction,
-              structured approvals, and clean exports. All in one place.
+              Supplier invoices, end to end — AI-assisted extraction,
+              structured review, and clean Sage exports. All in one place.
             </p>
           </div>
 
-          {/* Two feature pillars */}
+          {/* Feature pillar */}
           <div style={styles.pillarsRow} className="animate-rise delay-2">
             <PillarCard
               icon={<InvoiceIcon />}
               accent="#00B4D8"
               label="Invoices"
               description="Email intake → AI extraction → Finance review → Approver sign-off → Sage export"
-            />
-            <PillarCard
-              icon={<ExpenseIcon />}
-              accent="#06D6A0"
-              label="Expenses"
-              description="Staff upload receipt → AI extraction → Finance coding → Approval → Export"
             />
           </div>
 
@@ -251,15 +245,6 @@ function InvoiceIcon() {
       <line x1="16" y1="13" x2="8" y2="13"/>
       <line x1="16" y1="17" x2="8" y2="17"/>
       <polyline points="10,9 9,9 8,9"/>
-    </svg>
-  );
-}
-
-function ExpenseIcon() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="1" y="4" width="22" height="16" rx="2" ry="2"/>
-      <line x1="1" y1="10" x2="23" y2="10"/>
     </svg>
   );
 }
