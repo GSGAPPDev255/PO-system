@@ -97,6 +97,17 @@ export default function InvoiceReview() {
     }
   }, [form.net_amount, nominal1.transaction_value]);
 
+  // Default nominal line 1's Account Number to the Supplier Code whenever it's
+  // blank (works on load, on pick, or on manual entry — not just the dropdown).
+  // Editable: a manually entered GL nominal code is never overwritten.
+  useEffect(() => {
+    const code = form.account_number;
+    const current = nominal1.nominal_account_number;
+    if (code && String(code).trim() && (current == null || String(current).trim() === '')) {
+      setNominal1((prev) => ({ ...prev, nominal_account_number: code }));
+    }
+  }, [form.account_number, nominal1.nominal_account_number]);
+
   useEffect(() => {
     if (po?.invoice_file_id) {
       const fileData = (po as Record<string, unknown>).invoice_file as { storage_path?: string } | null;
@@ -659,18 +670,13 @@ export default function InvoiceReview() {
                   disabled={!isEditable}
                   allowCreate={isEditable}
                   onChange={(code) => setForm((prev) => ({ ...prev, supplier_ref_code: code || null }))}
-                  onSelect={(s: Supplier) => {
-                    setForm((prev) => ({
-                      ...prev,
-                      supplier_ref_code: s.code,
-                      // Supplier Code always mirrors the supplier picked from the list.
-                      account_number: s.code,
-                      supplier_name: prev.supplier_name?.trim() ? prev.supplier_name : s.name,
-                    }));
-                    // Default the nominal ledger Account Number to the supplier code
-                    // (a starting point — finance can overtype with the GL nominal code).
-                    setNominal1((prev) => ({ ...prev, nominal_account_number: s.code }));
-                  }}
+                  onSelect={(s: Supplier) => setForm((prev) => ({
+                    ...prev,
+                    supplier_ref_code: s.code,
+                    // Supplier Code always mirrors the supplier picked from the list.
+                    account_number: s.code,
+                    supplier_name: prev.supplier_name?.trim() ? prev.supplier_name : s.name,
+                  }))}
                 />
               </div>
             </div>
