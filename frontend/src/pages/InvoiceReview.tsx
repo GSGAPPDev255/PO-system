@@ -659,13 +659,18 @@ export default function InvoiceReview() {
                   disabled={!isEditable}
                   allowCreate={isEditable}
                   onChange={(code) => setForm((prev) => ({ ...prev, supplier_ref_code: code || null }))}
-                  onSelect={(s: Supplier) => setForm((prev) => ({
-                    ...prev,
-                    supplier_ref_code: s.code,
-                    // Supplier Code always mirrors the supplier picked from the list.
-                    account_number: s.code,
-                    supplier_name: prev.supplier_name?.trim() ? prev.supplier_name : s.name,
-                  }))}
+                  onSelect={(s: Supplier) => {
+                    setForm((prev) => ({
+                      ...prev,
+                      supplier_ref_code: s.code,
+                      // Supplier Code always mirrors the supplier picked from the list.
+                      account_number: s.code,
+                      supplier_name: prev.supplier_name?.trim() ? prev.supplier_name : s.name,
+                    }));
+                    // Default the nominal ledger Account Number to the supplier code
+                    // (a starting point — finance can overtype with the GL nominal code).
+                    setNominal1((prev) => ({ ...prev, nominal_account_number: s.code }));
+                  }}
                 />
               </div>
             </div>
