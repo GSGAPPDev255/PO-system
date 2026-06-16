@@ -160,6 +160,9 @@ function validatePo(
 
   // Required fields
   if (!po.supplier_name) errors.push('Supplier Name is required');
+  if (!String(po.supplier_ref_code ?? po.account_number ?? '').trim()) {
+    errors.push('Supplier Ref Code is required (Sage AccountNumber)');
+  }
   if (!po.transaction_date) errors.push('Transaction Date is required');
 
   return { valid: errors.length === 0, errors };
@@ -238,23 +241,27 @@ Deno.serve(async (req) => {
       const v1 = vl.find((l) => l.line_number === 1);
       const v2 = vl.find((l) => l.line_number === 2);
 
+      // Sage AccountNumber = the supplier reference code picked from the supplier
+      // list (falls back to the legacy account_number field if absent).
+      const supplierCode = String(po.supplier_ref_code || po.account_number || '').trim();
+
       // Sage narrative format (matches GSG_PI_Upload_Original.csv): the supplier
-      // account code, zero-padded to 8 digits, then " - ", then the description.
-      // e.g. account 733 + "Zioxi …" → "00000733 - Zioxi …"
-      const acct8 = String(po.account_number ?? '').trim().padStart(8, '0');
+      // code, then " - ", then the description. Numeric codes are zero-padded to
+      // 8 digits (e.g. 733 → "00000733 - …"); alphanumeric codes are used as-is.
+      const acctPrefix = /^\d+$/.test(supplierCode) ? supplierCode.padStart(8, '0') : supplierCode;
       const narrative = (text: unknown): string => {
         const t = String(text ?? '').trim();
         if (!t) return '';
-        // Don't double-prefix if the text already starts with the padded code.
-        return t.startsWith(acct8) ? t : `${acct8} - ${t}`;
+        // Don't double-prefix if the text already starts with the code.
+        return acctPrefix && !t.startsWith(acctPrefix) ? `${acctPrefix} - ${t}` : t;
       };
 
       // ── Build the 46-column Sage 200 PI row ────────────────────────────────
       // Column order matches SAGE_HEADERS exactly.
       // Mapping source: GSG_PI_Upload_Claude.csv rows 2 & 3.
       const row: string[] = [
-        //  1. AccountNumber — supplier's Sage account code
-        po.account_number ?? '',
+        //  1. AccountNumber — supplier reference code from the supplier list
+        supplierCode,
         //  2. CBAccountNumber — blank
         '',
         //  3. DaysDiscountValid — blank

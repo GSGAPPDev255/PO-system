@@ -235,6 +235,9 @@ export default function InvoiceReview() {
     if (!form.supplier_name?.trim()) {
       errors.push('Supplier Name is required');
     }
+    if (!form.supplier_ref_code?.trim()) {
+      errors.push('Supplier Ref Code is required (pick from the supplier list — Sage needs it for the export)');
+    }
     if (!form.transaction_date) {
       errors.push('Transaction Date is required');
     }
@@ -276,6 +279,7 @@ export default function InvoiceReview() {
   const validateForFiling = (): string[] => {
     const errors: string[] = [];
     if (!form.supplier_name?.trim()) errors.push('Supplier Name is required');
+    if (!form.supplier_ref_code?.trim()) errors.push('Supplier Ref Code is required (pick from the supplier list — Sage needs it for the export)');
     if (!form.transaction_date) errors.push('Transaction Date is required');
     const net = Number(form.net_amount ?? 0);
     const vat = Number(form.vat_amount ?? 0);
@@ -663,7 +667,9 @@ export default function InvoiceReview() {
               {f('supplier_name', 'Supplier Name')}
               {f('supplier_ref', 'Supplier Ref')}
               <div style={styles.field}>
-                <label style={styles.label}>Supplier Ref Code</label>
+                <label style={styles.label}>
+                  Supplier Ref Code <span style={styles.required}>*</span>
+                </label>
                 <SupplierPicker
                   value={String(form.supplier_ref_code ?? '')}
                   company={(poData as unknown as Record<string, unknown>).company as string | null}
@@ -678,6 +684,11 @@ export default function InvoiceReview() {
                     supplier_name: prev.supplier_name?.trim() ? prev.supplier_name : s.name,
                   }))}
                 />
+                {isEditable && !form.supplier_ref_code?.trim() && (
+                  <span style={styles.fieldWarn}>
+                    Required — pick the supplier from the list (Sage uses this as the Account Number)
+                  </span>
+                )}
               </div>
             </div>
           </Section>
