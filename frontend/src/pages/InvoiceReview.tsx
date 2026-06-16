@@ -238,6 +238,9 @@ export default function InvoiceReview() {
     if (!form.supplier_ref_code?.trim()) {
       errors.push('Supplier Ref Code is required (pick from the supplier list — Sage needs it for the export)');
     }
+    if (!String(nominal1.transaction_analysis_code ?? '').trim()) {
+      errors.push('Nominal UniCode is required (pick it on Nominal Ledger line 1)');
+    }
     if (!form.transaction_date) {
       errors.push('Transaction Date is required');
     }
@@ -280,6 +283,7 @@ export default function InvoiceReview() {
     const errors: string[] = [];
     if (!form.supplier_name?.trim()) errors.push('Supplier Name is required');
     if (!form.supplier_ref_code?.trim()) errors.push('Supplier Ref Code is required (pick from the supplier list — Sage needs it for the export)');
+    if (!String(nominal1.transaction_analysis_code ?? '').trim()) errors.push('Nominal UniCode is required (pick it on Nominal Ledger line 1)');
     if (!form.transaction_date) errors.push('Transaction Date is required');
     const net = Number(form.net_amount ?? 0);
     const vat = Number(form.vat_amount ?? 0);
@@ -715,8 +719,21 @@ export default function InvoiceReview() {
           </Section>
 
           <Section title="Nominal Ledger Analysis" number="04">
-            <NominalLineEditor lineNumber={1} value={nominal1} onChange={setNominal1} readOnly={!isEditable} />
-            <NominalLineEditor lineNumber={2} value={nominal2} onChange={setNominal2} readOnly={!isEditable} />
+            <NominalLineEditor
+              lineNumber={1}
+              value={nominal1}
+              onChange={setNominal1}
+              readOnly={!isEditable}
+              company={(poData as unknown as Record<string, unknown>).company as string | null}
+              requireUniCode={isEditable}
+            />
+            <NominalLineEditor
+              lineNumber={2}
+              value={nominal2}
+              onChange={setNominal2}
+              readOnly={!isEditable}
+              company={(poData as unknown as Record<string, unknown>).company as string | null}
+            />
           </Section>
 
           <Section title="VAT Analysis" number="05">
