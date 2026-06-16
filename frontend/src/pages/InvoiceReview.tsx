@@ -662,8 +662,9 @@ export default function InvoiceReview() {
                   onSelect={(s: Supplier) => setForm((prev) => ({
                     ...prev,
                     supplier_ref_code: s.code,
+                    // Supplier Code always mirrors the supplier picked from the list.
+                    account_number: s.code,
                     supplier_name: prev.supplier_name?.trim() ? prev.supplier_name : s.name,
-                    account_number: prev.account_number?.trim() ? prev.account_number : s.code,
                   }))}
                 />
               </div>
