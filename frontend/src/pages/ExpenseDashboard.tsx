@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { format, parseISO, isValid } from 'date-fns';
 import { useExpenses, useCreateExpense } from '../hooks/useExpenses';
+import { useCompanyAccess } from '../hooks/useCompanyAccess';
 import { supabase } from '../lib/supabase';
 import type { ExpenseStatus, ExpenseCategory, EXPENSE_CATEGORY_LABELS } from '../lib/supabase';
 import { EXPENSE_CATEGORY_LABELS as LABELS } from '../lib/supabase';
@@ -42,23 +43,28 @@ function fmtMoney(amount: number | null, currency = 'GBP'): string {
 export default function ExpenseDashboard() {
   const navigate = useNavigate();
   const [statusFilter, setStatusFilter] = useState<FilterStatus>('all');
+  const [companyFilter, setCompanyFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
   const [showUpload, setShowUpload] = useState(false);
+  const { companies } = useCompanyAccess();
 
   const { data: expenses = [], isLoading, error } = useExpenses(
     statusFilter === 'all' ? undefined : statusFilter,
   );
 
   const filtered = useMemo(() => {
-    if (!search.trim()) return expenses;
-    const q = search.toLowerCase();
-    return expenses.filter(e =>
-      (e.employee_name ?? '').toLowerCase().includes(q) ||
-      (e.employee_email ?? '').toLowerCase().includes(q) ||
-      (e.merchant_name ?? '').toLowerCase().includes(q) ||
-      (e.category ?? '').toLowerCase().includes(q),
-    );
-  }, [expenses, search]);
+    const q = search.trim().toLowerCase();
+    return expenses.filter(e => {
+      if (companyFilter !== 'all' && (e as unknown as Record<string, unknown>).company !== companyFilter) return false;
+      if (!q) return true;
+      return (
+        (e.employee_name ?? '').toLowerCase().includes(q) ||
+        (e.employee_email ?? '').toLowerCase().includes(q) ||
+        (e.merchant_name ?? '').toLowerCase().includes(q) ||
+        (e.category ?? '').toLowerCase().includes(q)
+      );
+    });
+  }, [expenses, search, companyFilter]);
 
   const totals = useMemo(() => {
     let total = 0, pending = 0, approved = 0;
@@ -129,6 +135,25 @@ export default function ExpenseDashboard() {
             </button>
           ))}
         </div>
+
+        {companies.length > 1 && (
+          <div style={styles.filterChips} className="filter-chips">
+            {[{ name: 'All companies', slug: 'all' }, ...companies].map(c => (
+              <button
+                key={c.slug}
+                style={{
+                  ...styles.chip,
+                  ...(companyFilter === c.slug
+                    ? { ...styles.chipActive, background: 'var(--accent-3)', borderColor: 'var(--accent-3)' }
+                    : {}),
+                }}
+                onClick={() => setCompanyFilter(c.slug)}
+              >
+                {c.name}
+              </button>
+            ))}
+          </div>
+        )}
         <input
           type="text"
           placeholder="Search employee, merchant…"
@@ -242,16 +267,18 @@ function UploadModal({ onClose }: { onClose: () => void }) {
   const [employeeEmail, setEmployeeEmail] = useState('');
   const [employeeName, setEmployeeName] = useState('');
   const [category, setCategory] = useState<ExpenseCategory>('other');
+  const [company, setCompany] = useState<string>('');
   const [dragOver, setDragOver] = useState(false);
   const navigate = useNavigate();
   const createExpense = useCreateExpense();
+  const { companies } = useCompanyAccess();
 
   const handleSubmit = async () => {
-    if (!file || !employeeEmail) return;
+    if (!file || !employeeEmail || !company) return;
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
     try {
-      const expense = await createExpense.mutateAsync({ file, employeeEmail, employeeName, category, userId: user.id });
+      const expense = await createExpense.mutateAsync({ file, employeeEmail, employeeName, category, company, userId: user.id });
       onClose();
       navigate(`/expenses/${expense.id}`);
     } catch (err) {
@@ -330,6 +357,17 @@ function UploadModal({ onClose }: { onClose: () => void }) {
             />
           </div>
           <div>
+            <label>Company *</label>
+            <select
+              value={company}
+              onChange={e => setCompany(e.target.value)}
+              style={{ width: '100%', marginTop: 6 }}
+            >
+              <option value="">Select company…</option>
+              {companies.map(c => <option key={c.slug} value={c.slug}>{c.name}</option>)}
+            </select>
+          </div>
+          <div>
             <label>Expense Category *</label>
             <select
               value={category}
@@ -353,7 +391,7 @@ function UploadModal({ onClose }: { onClose: () => void }) {
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
           <button
             className="btn btn-accent"
-            disabled={!file || !employeeEmail || createExpense.isPending}
+            disabled={!file || !employeeEmail || !company || createExpense.isPending}
             onClick={handleSubmit}
           >
             {createExpense.isPending ? 'Uploading & scanning…' : 'Upload & Start OCR'}

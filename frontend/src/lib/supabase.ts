@@ -196,6 +196,7 @@ export interface Expense {
   employee_email: string;
   employee_name: string | null;
   category: ExpenseCategory;
+  company: string | null;
   description: string | null;
   receipt_date: string | null;
   merchant_name: string | null;

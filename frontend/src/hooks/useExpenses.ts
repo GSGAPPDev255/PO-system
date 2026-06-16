@@ -94,12 +94,14 @@ export function useCreateExpense() {
       employeeEmail,
       employeeName,
       category,
+      company,
       userId,
     }: {
       file: File;
       employeeEmail: string;
       employeeName: string;
       category: string;
+      company: string;
       userId: string;
     }) => {
       // 1. Upload file to storage
@@ -136,6 +138,7 @@ export function useCreateExpense() {
           employee_email: employeeEmail,
           employee_name: employeeName,
           category,
+          company,
           amount: 0,
           currency: 'GBP',
           created_by_id: userId,

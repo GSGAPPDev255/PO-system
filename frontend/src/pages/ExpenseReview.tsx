@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useExpense, useSaveExpense, useSendExpenseApproval } from '../hooks/useExpenses';
+import { useCompanyAccess } from '../hooks/useCompanyAccess';
 import { supabase } from '../lib/supabase';
 import type { ExpenseCategory, ExpenseStatus } from '../lib/supabase';
 import { EXPENSE_CATEGORY_LABELS as LABELS } from '../lib/supabase';
@@ -37,6 +38,7 @@ export default function ExpenseReview() {
   const { data: expense, isLoading, error } = useExpense(id!);
   const saveExpense = useSaveExpense();
   const sendApproval = useSendExpenseApproval();
+  const { companies } = useCompanyAccess();
 
   // Approvers list
   const [approvers, setApprovers] = useState<{ id: string; display_name: string; email: string }[]>([]);
@@ -49,6 +51,7 @@ export default function ExpenseReview() {
     merchant_name: '',
     receipt_date: '',
     category: 'other' as ExpenseCategory,
+    company: '',
     amount: '',
     currency: 'GBP',
     gl_code: '',
@@ -71,6 +74,7 @@ export default function ExpenseReview() {
       merchant_name:         expense.merchant_name ?? '',
       receipt_date:          fmtDate(expense.receipt_date),
       category:              expense.category ?? 'other',
+      company:               (expense as unknown as Record<string, unknown>).company as string ?? '',
       amount:                expense.amount != null ? String(expense.amount) : '',
       currency:              expense.currency ?? 'GBP',
       gl_code:               expense.gl_code ?? '',
@@ -113,6 +117,7 @@ export default function ExpenseReview() {
           merchant_name:         form.merchant_name || null,
           receipt_date:          form.receipt_date || null,
           category:              form.category,
+          company:               form.company || null,
           amount:                parseFloat(form.amount) || 0,
           currency:              form.currency,
           gl_code:               form.gl_code || null,
@@ -152,6 +157,7 @@ export default function ExpenseReview() {
           merchant_name:         form.merchant_name || null,
           receipt_date:          form.receipt_date || null,
           category:              form.category,
+          company:               form.company || null,
           amount:                parseFloat(form.amount) || 0,
           currency:              form.currency,
           gl_code:               form.gl_code || null,
@@ -301,6 +307,19 @@ export default function ExpenseReview() {
                 {field('Receipt Date', inp('receipt_date', 'date'))}
               </div>
             </div>
+
+            {field('Company *',
+              <select
+                value={form.company}
+                disabled={!isEditable}
+                onChange={e => setForm(f => ({ ...f, company: e.target.value }))}
+                style={{ width: '100%', marginTop: 6 }}
+              >
+                <option value="">Select company…</option>
+                {companies.map(c => <option key={c.slug} value={c.slug}>{c.name}</option>)}
+              </select>,
+              'Which company this expense belongs to',
+            )}
 
             {field('Category *',
               <select

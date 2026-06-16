@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { useCompanyAccess } from '../hooks/useCompanyAccess';
 
 type SpendRecord = {
   id: string;
@@ -188,6 +189,8 @@ export default function SpendingDashboard() {
   const [records, setRecords] = useState<SpendRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState<'3m' | '6m' | '12m' | 'all'>('12m');
+  const [companyFilter, setCompanyFilter] = useState<string>('all');
+  const { companies } = useCompanyAccess();
 
   useEffect(() => {
     (async () => {
@@ -214,12 +217,17 @@ export default function SpendingDashboard() {
   }, []);
 
   const filtered = useMemo(() => {
-    if (period === 'all') return records;
-    const months = period === '3m' ? 3 : period === '6m' ? 6 : 12;
     const cutoff = new Date();
-    cutoff.setMonth(cutoff.getMonth() - months);
-    return records.filter(r => r.transaction_date && new Date(r.transaction_date) >= cutoff);
-  }, [records, period]);
+    if (period !== 'all') {
+      const months = period === '3m' ? 3 : period === '6m' ? 6 : 12;
+      cutoff.setMonth(cutoff.getMonth() - months);
+    }
+    return records.filter(r => {
+      if (companyFilter !== 'all' && r.company !== companyFilter) return false;
+      if (period === 'all') return true;
+      return r.transaction_date && new Date(r.transaction_date) >= cutoff;
+    });
+  }, [records, period, companyFilter]);
 
   // KPIs
   const totalSpend = useMemo(() => filtered.reduce((s, r) => s + Number(r.gross_amount ?? 0), 0), [filtered]);
@@ -286,17 +294,33 @@ export default function SpendingDashboard() {
             Approved and exported invoices — {invoiceCount} record{invoiceCount === 1 ? '' : 's'} analysed
           </p>
         </div>
-        {/* Period selector */}
-        <div style={styles.periodTabs}>
-          {(['3m', '6m', '12m', 'all'] as const).map(p => (
-            <button
-              key={p}
-              style={{ ...styles.periodTab, ...(period === p ? styles.periodTabActive : {}) }}
-              onClick={() => setPeriod(p)}
-            >
-              {p === 'all' ? 'All time' : `Last ${p}`}
-            </button>
-          ))}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end' }}>
+          {/* Company selector */}
+          {companies.length > 1 && (
+            <div style={styles.periodTabs}>
+              {[{ name: 'All', slug: 'all' }, ...companies].map(c => (
+                <button
+                  key={c.slug}
+                  style={{ ...styles.periodTab, ...(companyFilter === c.slug ? styles.periodTabActive : {}) }}
+                  onClick={() => setCompanyFilter(c.slug)}
+                >
+                  {c.name}
+                </button>
+              ))}
+            </div>
+          )}
+          {/* Period selector */}
+          <div style={styles.periodTabs}>
+            {(['3m', '6m', '12m', 'all'] as const).map(p => (
+              <button
+                key={p}
+                style={{ ...styles.periodTab, ...(period === p ? styles.periodTabActive : {}) }}
+                onClick={() => setPeriod(p)}
+              >
+                {p === 'all' ? 'All time' : `Last ${p}`}
+              </button>
+            ))}
+          </div>
         </div>
       </header>
 

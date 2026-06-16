@@ -6,6 +6,7 @@ import { useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { format, parseISO, isValid, startOfMonth, endOfMonth } from 'date-fns';
 import { useExpenses, useCreateExpense } from '../hooks/useExpenses';
+import { useCompanyAccess } from '../hooks/useCompanyAccess';
 import { useInstallPrompt } from '../hooks/useInstallPrompt';
 import { supabase } from '../lib/supabase';
 import type { ExpenseCategory } from '../lib/supabase';
@@ -93,10 +94,12 @@ function UploadModal({ onClose, onCreated }: UploadModalProps) {
   const [preview, setPreview] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [category, setCategory] = useState<ExpenseCategory>('other');
+  const [company, setCompany] = useState<string>('');
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const createExpense = useCreateExpense();
+  const { companies } = useCompanyAccess();
 
   const accept = useCallback((f: File) => {
     if (!f.type.startsWith('image/') && f.type !== 'application/pdf') {
@@ -127,6 +130,7 @@ function UploadModal({ onClose, onCreated }: UploadModalProps) {
 
   async function handleSubmit() {
     if (!file) return;
+    if (!company) { setErr('Please choose the company this expense is for.'); return; }
     setErr(null);
     setSubmitting(true);
     try {
@@ -144,6 +148,7 @@ function UploadModal({ onClose, onCreated }: UploadModalProps) {
         employeeEmail: profile?.email ?? user.email ?? '',
         employeeName: profile?.display_name ?? user.email ?? '',
         category,
+        company,
         userId: user.id,
       });
 
@@ -212,6 +217,24 @@ function UploadModal({ onClose, onCreated }: UploadModalProps) {
                 📄 <strong>{file.name}</strong> uploaded
               </div>
             )}
+
+            {/* Company */}
+            <div style={modalStyles.field}>
+              <label style={modalStyles.label}>Company</label>
+              <select
+                style={modalStyles.select}
+                value={company}
+                onChange={e => setCompany(e.target.value)}
+              >
+                <option value="">Select company…</option>
+                {companies.map(c => <option key={c.slug} value={c.slug}>{c.name}</option>)}
+              </select>
+              {companies.length === 0 && (
+                <p style={modalStyles.hint}>
+                  You don't have access to any company yet — ask an admin to grant access.
+                </p>
+              )}
+            </div>
 
             {/* Category */}
             <div style={modalStyles.field}>
