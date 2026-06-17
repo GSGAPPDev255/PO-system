@@ -336,16 +336,16 @@ Deno.serve(async (req) => {
         formatAmount(po.net_amount),
         // 23. NominalAnalysisTransactionValue/1 — nominal line 1 value (defaults to net)
         formatAmount(n1?.transaction_value ?? po.net_amount),
-        // 24. NominalAnalysisNominalAccountNumber/1 → cost centre (acct_code from UniCode picker)
+        // 24. NominalAnalysisNominalAccountNumber/1 → acct_code (e.g. 6100)
         (n1?.nominal_cost_centre as string) ?? '',
-        // 25. NominalAnalysisNominalCostCentre/1 — blank
-        '',
-        // 26. NominalAnalysisNominalDepartment/1 — department
+        // 25. NominalAnalysisNominalCostCentre/1 → cost_centre (e.g. KGPS)
         (n1?.nominal_department as string) ?? '',
+        // 26. NominalAnalysisNominalDepartment/1 → dept (e.g. ART)
+        (n1?.nominal_account_number as string) ?? '',
         // 27. NominalAnalysisNominalAnalysisNarrative/1 — "{acct} - {description}"
         narrative((n1?.nominal_analysis_narrative as string) || po.description),
-        // 28. NominalAnalysisTransactionAnalysisCode/1 — analysis code from line 1
-        (n1?.transaction_analysis_code as string) ?? '',
+        // 28. NominalAnalysisTransactionAnalysisCode/1 — blank
+        '',
         // 29. NominalAnalysisTransactionValue/2 — nominal line 2 value (blank if none)
         formatAmount(n2?.transaction_value),
         // 30. NominalAnalysisNominalAccountNumber/2 — blank
@@ -356,8 +356,8 @@ Deno.serve(async (req) => {
         '',
         // 33. NominalAnalysisNominalAnalysisNarrative/2 — "{acct} - {narrative}"
         n2 ? narrative(n2?.nominal_analysis_narrative) : '',
-        // 34. TaxAnalysisTaxRate/1 — Sage tax code from VAT line 1 (0/1/2…)
-        (v1?.vat_code as string) ?? '',
+        // 34. TaxAnalysisTaxRate/1 — Sage tax code (defaults to 1 if not set)
+        (v1?.vat_code as string) || '1',
         // 35. TaxAnalysisGoodsValueBeforeDiscount/1 — NET goods (matches original Sage file)
         formatAmount(v1?.goods_value_before_discount ?? po.net_amount),
         // 36. TaxAnalysisDiscountValue/1 — blank

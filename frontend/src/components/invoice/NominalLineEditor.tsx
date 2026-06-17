@@ -39,7 +39,7 @@ export default function NominalLineEditor({
         <span style={styles.rule} />
       </div>
       <div style={styles.grid}>
-        {/* UniCode picker — fills Cost Centre (Acct Code) and Department (Account Name) */}
+        {/* UniCode picker — auto-fills Acct Code (X), Cost Centre (Y), Dept (Z) */}
         <div style={{ ...styles.field, gridColumn: '1 / -1' }} key="unicode">
           <label style={styles.label}>
             UniCode{requireUniCode ? ' *' : ''}
@@ -52,8 +52,9 @@ export default function NominalLineEditor({
             onChange={(code) => onChange({ transaction_analysis_code: code || null })}
             onSelect={(c: NominalCode) => onChange({
               transaction_analysis_code: c.unicode,
-              nominal_cost_centre: c.acct_code ?? null,
-              nominal_department: c.account_name ?? null,
+              nominal_cost_centre: c.acct_code ?? null,   // → CSV col X
+              nominal_department: c.cost_centre ?? null,  // → CSV col Y
+              nominal_account_number: c.dept ?? null,     // → CSV col Z
             })}
           />
           {uniCodeMissing && (
@@ -61,9 +62,9 @@ export default function NominalLineEditor({
           )}
         </div>
         {f('transaction_value', 'Transaction Value', 'number')}
-        {f('nominal_account_number', 'Account Number')}
-        {f('nominal_cost_centre', 'Cost Centre')}
-        {f('nominal_department', 'Department')}
+        {f('nominal_cost_centre', 'Acct Code')}
+        {f('nominal_department', 'Cost Centre')}
+        {f('nominal_account_number', 'Dept')}
         {f('nominal_analysis_narrative', 'Narrative')}
       </div>
     </div>

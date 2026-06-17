@@ -97,16 +97,6 @@ export default function InvoiceReview() {
     }
   }, [form.net_amount, nominal1.transaction_value]);
 
-  // Default nominal line 1's Account Number to the Supplier Code whenever it's
-  // blank (works on load, on pick, or on manual entry — not just the dropdown).
-  // Editable: a manually entered GL nominal code is never overwritten.
-  useEffect(() => {
-    const code = form.account_number;
-    const current = nominal1.nominal_account_number;
-    if (code && String(code).trim() && (current == null || String(current).trim() === '')) {
-      setNominal1((prev) => ({ ...prev, nominal_account_number: code }));
-    }
-  }, [form.account_number, nominal1.nominal_account_number]);
 
   useEffect(() => {
     if (po?.invoice_file_id) {
