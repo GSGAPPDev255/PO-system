@@ -336,10 +336,10 @@ Deno.serve(async (req) => {
         formatAmount(po.net_amount),
         // 23. NominalAnalysisTransactionValue/1 — nominal line 1 value (defaults to net)
         formatAmount(n1?.transaction_value ?? po.net_amount),
-        // 24. NominalAnalysisNominalAccountNumber/1 — nominal account code
-        (n1?.nominal_account_number as string) ?? '',
-        // 25. NominalAnalysisNominalCostCentre/1 — cost centre
+        // 24. NominalAnalysisNominalAccountNumber/1 → cost centre (acct_code from UniCode picker)
         (n1?.nominal_cost_centre as string) ?? '',
+        // 25. NominalAnalysisNominalCostCentre/1 — blank
+        '',
         // 26. NominalAnalysisNominalDepartment/1 — department
         (n1?.nominal_department as string) ?? '',
         // 27. NominalAnalysisNominalAnalysisNarrative/1 — "{acct} - {description}"
@@ -348,12 +348,12 @@ Deno.serve(async (req) => {
         (n1?.transaction_analysis_code as string) ?? '',
         // 29. NominalAnalysisTransactionValue/2 — nominal line 2 value (blank if none)
         formatAmount(n2?.transaction_value),
-        // 30. NominalAnalysisNominalAccountNumber/2 — nominal account code line 2
-        (n2?.nominal_account_number as string) ?? '',
-        // 31. NominalAnalysisNominalCostCentre/2 — cost centre line 2
-        (n2?.nominal_cost_centre as string) ?? '',
-        // 32. NominalAnalysisNominalDepartment/2 — department line 2
-        (n2?.nominal_department as string) ?? '',
+        // 30. NominalAnalysisNominalAccountNumber/2 — blank
+        '',
+        // 31. NominalAnalysisNominalCostCentre/2 — blank
+        '',
+        // 32. NominalAnalysisNominalDepartment/2 — blank
+        '',
         // 33. NominalAnalysisNominalAnalysisNarrative/2 — "{acct} - {narrative}"
         n2 ? narrative(n2?.nominal_analysis_narrative) : '',
         // 34. TaxAnalysisTaxRate/1 — Sage tax code from VAT line 1 (0/1/2…)

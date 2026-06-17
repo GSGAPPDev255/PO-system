@@ -30,20 +30,6 @@ export default function VatLineEditor({
     </div>
   );
 
-  const txt = (key: keyof VatLine, label: string) => (
-    <div style={styles.field} key={key}>
-      <label style={styles.label}>{label}</label>
-      <input
-        type="text"
-        style={inputStyle(false)}
-        value={String(value[key] ?? '')}
-        readOnly={readOnly}
-        disabled={readOnly}
-        onChange={(e) => onChange({ [key]: e.target.value || null })}
-      />
-    </div>
-  );
-
   return (
     <div style={styles.card}>
       <div style={styles.header}>
@@ -52,7 +38,20 @@ export default function VatLineEditor({
       </div>
       <div style={styles.grid}>
         {num('tax_rate', 'Tax Rate (%)')}
-        {txt('vat_code', 'VAT Code')}
+        <div style={styles.field}>
+          <label style={styles.label}>VAT Code (Sage)</label>
+          <select
+            style={{ ...inputStyle(true), ...(!readOnly ? {} : styles.inputReadOnly) }}
+            value={String(value.vat_code ?? '')}
+            disabled={readOnly}
+            onChange={(e) => onChange({ vat_code: e.target.value || null })}
+          >
+            <option value="">—</option>
+            <option value="0">0</option>
+            <option value="1">1</option>
+            <option value="2">2</option>
+          </select>
+        </div>
         {num('goods_value_before_discount', 'Goods Value Before Discount')}
         {num('tax_on_goods_value', 'Tax on Goods Value')}
       </div>
